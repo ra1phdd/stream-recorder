@@ -1,6 +1,4 @@
-compiled/
-stintik.json
-t2x2.json
-stream-recorder.log
+build/
+logs/
+*.json
 .env
-compile.sh

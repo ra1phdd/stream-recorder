@@ -22,7 +22,13 @@ func Init(loggerLevel string) {
 
 	fileEncoder := zapcore.NewJSONEncoder(config)
 	consoleEncoder := zapcore.NewConsoleEncoder(config)
-	logFile, err := os.OpenFile("stream-recorder.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+
+	err := os.MkdirAll("logs", os.ModePerm)
+	if err != nil {
+		fmt.Println("Ошибка создания папки logs:", err)
+		return
+	}
+	logFile, err := os.OpenFile("logs/stream-recorder.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		fmt.Println("Ошибка создания файла stream-recorder.log", err)
 		return
@@ -48,7 +54,7 @@ func Init(loggerLevel string) {
 		zapcore.NewCore(fileEncoder, writer, defaultLogLevel),
 		zapcore.NewCore(consoleEncoder, zapcore.AddSync(os.Stdout), defaultLogLevel),
 	)
-	logger = zap.New(core, zap.AddCaller(), zap.AddStacktrace(zapcore.ErrorLevel))
+	logger = zap.New(core, zap.AddStacktrace(zapcore.ErrorLevel))
 	defer logger.Sync()
 }
 
