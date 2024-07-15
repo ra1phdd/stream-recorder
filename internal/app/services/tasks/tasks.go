@@ -5,6 +5,7 @@ import (
 	"stream-recorder/config"
 	"stream-recorder/internal/app/services/recorder"
 	"sync"
+	"time"
 )
 
 type TaskInfo struct {
@@ -39,6 +40,8 @@ func CutTask(configEnv *config.ConfigurationEnv, username string, platform strin
 	ctx, cancel := context.WithCancel(context.Background())
 
 	go recorder.Init(ctx, configEnv, username, platform, quality)
+
+	time.Sleep(15 * time.Second)
 
 	tasksLock.Lock()
 	tasks[platform+"_"+username] = TaskInfo{

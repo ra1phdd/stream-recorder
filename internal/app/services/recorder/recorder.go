@@ -62,7 +62,7 @@ func Init(ctx context.Context, configEnv *config.ConfigurationEnv, username stri
 
 		cmd = ffmpeg.
 			Input(m3u8).
-			Output(path+"output_%03d.mov", ffmpeg.KwArgs{
+			Output(path+username+"_"+time.Now().Format("15-04-05")+"_%03d.mov", ffmpeg.KwArgs{
 				"c:v":              configEnv.VideoCodec,
 				"c:a":              configEnv.AudioCodec,
 				"segment_time":     configEnv.TimeSegment,
@@ -73,7 +73,7 @@ func Init(ctx context.Context, configEnv *config.ConfigurationEnv, username stri
 	} else {
 		cmd = ffmpeg.
 			Input(m3u8).
-			Output(path+"output_%03d.mov", ffmpeg.KwArgs{
+			Output(path+username+"_"+time.Now().Format("15-04-05")+"_%03d.mov", ffmpeg.KwArgs{
 				"c:v": configEnv.VideoCodec,
 				"c:a": configEnv.AudioCodec,
 			}).
@@ -136,7 +136,7 @@ func FindLink(link string, username string, quality string, timeCheck int) strin
 
 func GeneratePath(rootPath string, username string) string {
 	currentTime := time.Now()
-	formattedTime := currentTime.Format("2006-01-02_15-04-05")
+	formattedTime := currentTime.Format("2006-01-02")
 
 	var path string
 	switch runtime.GOOS {
