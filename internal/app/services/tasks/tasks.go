@@ -15,13 +15,12 @@ type TaskInfo struct {
 	Cancel   context.CancelFunc
 }
 
-// Глобальная мапа для хранения рабочих горутин
 var (
 	tasks     = make(map[string]TaskInfo)
 	tasksLock sync.Mutex
 )
 
-func StartTask(configEnv *config.ConfigurationEnv, username string, platform string, quality string) {
+func StartTask(configEnv *config.Env, username string, platform string, quality string) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	tasksLock.Lock()
@@ -33,13 +32,13 @@ func StartTask(configEnv *config.ConfigurationEnv, username string, platform str
 	}
 	tasksLock.Unlock()
 
-	go recorder.Init(ctx, configEnv, username, platform, quality)
+	go recorder.Init(ctx, configEnv, platform, username, quality)
 }
 
-func CutTask(configEnv *config.ConfigurationEnv, username string, platform string, quality string) {
+func CutTask(configEnv *config.Env, platform string, username string, quality string) {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	go recorder.Init(ctx, configEnv, username, platform, quality)
+	go recorder.Init(ctx, configEnv, platform, username, quality)
 
 	time.Sleep(15 * time.Second)
 

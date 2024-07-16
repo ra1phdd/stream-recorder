@@ -25,12 +25,12 @@ func Init(loggerLevel string) {
 
 	err := os.MkdirAll("logs", os.ModePerm)
 	if err != nil {
-		fmt.Println("Ошибка создания папки logs:", err)
+		fmt.Println("Ошибка создания папки logs", err.Error())
 		return
 	}
 	logFile, err := os.OpenFile("logs/stream-recorder.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
-		fmt.Println("Ошибка создания файла stream-recorder.log", err)
+		fmt.Println("Ошибка создания файла stream-recorder.log", err.Error())
 		return
 	}
 	writer := zapcore.AddSync(logFile)

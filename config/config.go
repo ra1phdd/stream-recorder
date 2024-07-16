@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"go.uber.org/zap"
 	"os"
 	"stream-recorder/pkg/logger"
 	"sync"
@@ -12,9 +13,9 @@ import (
 )
 
 var mu sync.RWMutex
-var config *ConfigurationJSON
+var config *JSON
 
-type ConfigurationEnv struct {
+type Env struct {
 	Port          string `env:"PORT" envDefault:"8080"`
 	LoggerLevel   string `env:"LOGGER_LEVEL" envDefault:"warn"`
 	GinMode       string `env:"GIN_MODE" envDefault:"release"`
@@ -27,17 +28,17 @@ type ConfigurationEnv struct {
 	FileFormat    string `env:"FILE_FORMAT" envDefault:"mp4"`
 }
 
-type UserConfiguration struct {
+type StreamerConfig struct {
 	Platform string `json:"platform"`
 	Username string `json:"username"`
 	Quality  string `json:"quality"`
 }
 
-type ConfigurationJSON struct {
-	Users []UserConfiguration `json:"users"`
+type JSON struct {
+	Streamers []StreamerConfig `json:"streamers"`
 }
 
-func (c *ConfigurationEnv) NormalizeEnv() {
+func (c *Env) NormalizeEnv() {
 	switch c.SplitSegments {
 	case true, false:
 		break
@@ -55,10 +56,10 @@ func (c *ConfigurationEnv) NormalizeEnv() {
 	}
 }
 
-func NewConfig(files ...string) (*ConfigurationEnv, error) {
+func NewConfig(files ...string) (*Env, error) {
 	err := godotenv.Load(files...)
 
-	cfg := ConfigurationEnv{}
+	cfg := Env{}
 	err = env.Parse(&cfg)
 	if err != nil {
 		return nil, err
@@ -69,8 +70,8 @@ func NewConfig(files ...string) (*ConfigurationEnv, error) {
 	return &cfg, nil
 }
 
-func ReadJSONConfig() (*ConfigurationJSON, error) {
-	var cfg ConfigurationJSON
+func ReadJSONConfig() (*JSON, error) {
+	var cfg JSON
 	file, err := os.Open("streamers.json")
 	if err != nil {
 		return &cfg, err
@@ -86,7 +87,6 @@ func ReadJSONConfig() (*ConfigurationJSON, error) {
 	return &cfg, nil
 }
 
-// Функция для обновления конфигурации
 func UpdateJSONConfig() error {
 	cfg, err := ReadJSONConfig()
 	if err != nil {
@@ -97,12 +97,11 @@ func UpdateJSONConfig() error {
 	config = cfg
 	mu.Unlock()
 
-	fmt.Println("Configuration reloaded:", config)
+	logger.Debug("Обновление JSON-конфигурации", zap.Any("cfg", cfg))
 	return nil
 }
 
-// Запись конфигурации в файл
-func WriteConfig(cfg *ConfigurationJSON) error {
+func WriteConfig(cfg *JSON) error {
 	file, err := os.Create("streamers.json")
 	if err != nil {
 		return err
@@ -118,12 +117,13 @@ func WriteConfig(cfg *ConfigurationJSON) error {
 	return nil
 }
 
-func AddUser(user UserConfiguration) error {
+func AddUser(user StreamerConfig) error {
 	mu.Lock()
 	defer mu.Unlock()
 
-	config.Users = append(config.Users, user)
+	config.Streamers = append(config.Streamers, user)
 
+	logger.Debug("Добавление стримера в JSON", zap.Any("streamer", user))
 	return WriteConfig(config)
 }
 
@@ -131,24 +131,28 @@ func DeleteUser(username string) error {
 	mu.Lock()
 	defer mu.Unlock()
 
-	for i, user := range config.Users {
+	for i, user := range config.Streamers {
 		if user.Username == username {
-			config.Users = append(config.Users[:i], config.Users[i+1:]...)
+			config.Streamers = append(config.Streamers[:i], config.Streamers[i+1:]...)
+			logger.Debug("Удаление стримера из JSON", zap.Any("streamer", user))
 			return WriteConfig(config)
 		}
 	}
-	return fmt.Errorf("User not found")
+	return fmt.Errorf("стример не найден в JSON")
 }
 
-func GetUser(username string) error {
+func GetUser(username string) (bool, StreamerConfig) {
 	mu.Lock()
 	defer mu.Unlock()
 
-	for i, user := range config.Users {
+	for _, user := range config.Streamers {
 		if user.Username == username {
-			config.Users = append(config.Users[:i], config.Users[i+1:]...)
-			return WriteConfig(config)
+			return true, StreamerConfig{
+				Platform: user.Platform,
+				Username: user.Username,
+				Quality:  user.Quality,
+			}
 		}
 	}
-	return fmt.Errorf("User not found")
+	return false, StreamerConfig{}
 }
