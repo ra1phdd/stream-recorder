@@ -56,7 +56,7 @@ func findLink(platform string, username string, quality string, timeCheck int) s
 	case "twitch":
 		link = "twitch.tv/" + username
 	case "youtube":
-		link = "youtube.com/@" + username
+		link = "youtube.com/@" + username + "/live"
 	case "kick":
 		link = "kick.com/" + username
 	default:
