@@ -16,16 +16,18 @@ var mu sync.RWMutex
 var config *JSON
 
 type Env struct {
-	Port          string `env:"PORT" envDefault:"8080"`
-	LoggerLevel   string `env:"LOGGER_LEVEL" envDefault:"warn"`
-	GinMode       string `env:"GIN_MODE" envDefault:"release"`
-	RootPATH      string `env:"ROOT_PATH,required"`
-	SplitSegments bool   `env:"SPLIT_SEGMENTS" envDefault:"false"`
-	TimeSegment   int    `env:"TIME_SEGMENT" envDefault:"1800"`
-	TimeCheck     int    `env:"TIME_CHECK" envDefault:"15"`
-	VideoCodec    string `env:"VIDEO_CODEC" envDefault:"copy"`
-	AudioCodec    string `env:"AUDIO_CODEC" envDefault:"copy"`
-	FileFormat    string `env:"FILE_FORMAT" envDefault:"mp4"`
+	Port           string `env:"PORT" envDefault:"8080"`
+	LoggerLevel    string `env:"LOGGER_LEVEL" envDefault:"warn"`
+	GinMode        string `env:"GIN_MODE" envDefault:"release"`
+	RootPATH       string `env:"ROOT_PATH,required"`
+	StreamlinkPATH string `env:"STREAMLINK_PATH"`
+	FFmpegPATH     string `env:"FFMPEG_PATH"`
+	SplitSegments  bool   `env:"SPLIT_SEGMENTS" envDefault:"false"`
+	TimeSegment    int    `env:"TIME_SEGMENT" envDefault:"1800"`
+	TimeCheck      int    `env:"TIME_CHECK" envDefault:"15"`
+	VideoCodec     string `env:"VIDEO_CODEC" envDefault:"copy"`
+	AudioCodec     string `env:"AUDIO_CODEC" envDefault:"copy"`
+	FileFormat     string `env:"FILE_FORMAT" envDefault:"mp4"`
 }
 
 type StreamerConfig struct {

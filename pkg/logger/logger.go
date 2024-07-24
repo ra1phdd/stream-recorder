@@ -62,18 +62,38 @@ func Debug(message string, fields ...zap.Field) {
 	logger.Debug(message, fields...)
 }
 
+func Debugf(message string, username, platform string, fields ...zap.Field) {
+	logger.Debug(fmt.Sprintf("[%s/%s]", platform, username)+message, fields...)
+}
+
 func Info(message string, fields ...zap.Field) {
 	logger.Info(message, fields...)
+}
+
+func Infof(message string, username, platform string, fields ...zap.Field) {
+	logger.Info(fmt.Sprintf("[%s/%s] ", platform, username)+message, fields...)
 }
 
 func Warn(message string, fields ...zap.Field) {
 	logger.Warn(message, fields...)
 }
 
+func Warnf(message string, username, platform string, fields ...zap.Field) {
+	logger.Warn(fmt.Sprintf("[%s/%s] ", platform, username)+message, fields...)
+}
+
 func Error(message string, fields ...zap.Field) {
 	logger.Error(message, fields...)
 }
 
+func Errorf(message string, username, platform string, fields ...zap.Field) {
+	logger.Error(fmt.Sprintf("[%s/%s] ", platform, username)+message, fields...)
+}
+
 func Fatal(message string, fields ...zap.Field) {
 	logger.Fatal(message, fields...)
+}
+
+func Fatalf(message string, username, platform string, fields ...zap.Field) {
+	logger.Fatal(fmt.Sprintf("[%s/%s] ", platform, username)+message, fields...)
 }
