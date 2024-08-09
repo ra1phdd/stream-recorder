@@ -12,12 +12,10 @@ import (
 )
 
 func main() {
-	err := config.NewConfig()
+	cfg, err := config.NewConfig()
 	if err != nil {
 		log.Fatalf("%+v\n", err)
 	}
-
-	cfg := config.GetConfig()
 
 	application, err := app.New(cfg)
 	if err != nil {

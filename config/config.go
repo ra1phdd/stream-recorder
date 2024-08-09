@@ -13,7 +13,6 @@ import (
 )
 
 var mu sync.RWMutex
-var configEnv *Env = &Env{}
 var config *JSON
 
 type Env struct {
@@ -59,21 +58,18 @@ func (c *Env) NormalizeEnv() {
 	}
 }
 
-func NewConfig(files ...string) error {
+func NewConfig(files ...string) (*Env, error) {
 	err := godotenv.Load(files...)
 
-	err = env.Parse(configEnv)
+	cfg := Env{}
+	err = env.Parse(&cfg)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	configEnv.NormalizeEnv()
+	cfg.NormalizeEnv()
 
-	return nil
-}
-
-func GetConfig() *Env {
-	return configEnv
+	return &cfg, nil
 }
 
 func ReadJSONConfig() (*JSON, error) {
