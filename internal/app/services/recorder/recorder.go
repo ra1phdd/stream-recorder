@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"stream-recorder/config"
 	"stream-recorder/pkg/embed"
 	"stream-recorder/pkg/logger"
@@ -167,55 +166,40 @@ func runFFmpegCommand(m3u8, path, username, platform string, configEnv *config.E
 		filename = fmt.Sprintf("%s/%s_%s_%%03d.mov", path, username, time.Now().Format("15-04-05"))
 		args = []string{
 			"-re",
-			"-protocol_whitelist", "file,crypto,data,http,https,tls,tcp",
+			"-protocol_whitelist", "file,crypto,data,http,httpproxy,https,tls,tcp",
 			"-loglevel", "warning",
 			"-i", strings.Trim(m3u8, "\n"),
 			"-async", "1",
 			"-fps_mode", "cfr",
 			"-fflags", "+genpts",
 			"-bufsize", "20M",
-			"-reconnect", "1",
-			"-reconnect_at_eof", "1",
-			"-reconnect_streamed", "1",
-			"-reconnect_delay_max", "2",
 			"-c:v", configEnv.VideoCodec,
 			"-c:a", configEnv.AudioCodec,
 			"-segment_time", fmt.Sprint(configEnv.TimeSegment),
 			"-f", "segment",
 			"-reset_timestamps", "1",
-			"'" + filename + "'",
+			filename,
 		}
 	} else {
 		filename = fmt.Sprintf("%s/%s_%s.mov", path, username, time.Now().Format("15-04-05"))
 		args = []string{
 			"-re",
-			"-protocol_whitelist", "file,crypto,data,http,https,tls,tcp",
+			"-protocol_whitelist", "file,crypto,data,http,httpproxy,https,tls,tcp",
 			"-loglevel", "warning",
 			"-i", strings.Trim(m3u8, "\n"),
 			"-async", "1",
 			"-fps_mode", "cfr",
 			"-fflags", "+genpts",
 			"-bufsize", "20M",
-			"-reconnect", "1",
-			"-reconnect_at_eof", "1",
-			"-reconnect_streamed", "1",
-			"-reconnect_delay_max", "2",
 			"-c:v", configEnv.VideoCodec,
 			"-c:a", configEnv.AudioCodec,
-			"'" + filename + "'",
+			filename,
 		}
 	}
 	logger.Debug("Инициализация ffmpeg", zap.String("m3u8", m3u8), zap.String("filename", filename), zap.Bool("splitSegments", configEnv.SplitSegments), zap.Any("args", args))
 
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "windows":
-		cmd = exec.Command("cmd", "/C", "ffmpeg "+strings.Join(args, " "))
-	case "darwin", "linux":
-		cmd = exec.Command("sh", "-c", "ffmpeg "+strings.Join(args, " "))
-	default:
-		return fmt.Errorf("неподдерживаемая ОС: %s", runtime.GOOS)
-	}
+	// Segmentation fault - из-за Goland!!!
+	cmd := exec.Command(embed.GetTempFileName("ffmpeg"), args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = logFile
 

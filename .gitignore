@@ -1,4 +1,5 @@
 build/
 logs/
+pkg/embed/bin
 *.json
 .env

@@ -45,7 +45,8 @@ func Init(name string) error {
 }
 
 func GetTempFileName(name string) string {
-	var cfg config.Env
+	cfg := config.GetConfig()
+
 	var env string
 	switch name {
 	case "streamlink":
