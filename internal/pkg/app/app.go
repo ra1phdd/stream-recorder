@@ -8,7 +8,6 @@ import (
 	"stream-recorder/internal/app/endpoint/restStreamer"
 	"stream-recorder/internal/app/middlewares/noCache"
 	"stream-recorder/internal/app/services/tasks"
-	"stream-recorder/pkg/embed"
 	"stream-recorder/pkg/logger"
 )
 
@@ -20,16 +19,7 @@ func New(cfg *config.Env) (*App, error) {
 	gin.SetMode(cfg.GinMode)
 	logger.Init(cfg.LoggerLevel)
 
-	err := embed.Init("streamlink")
-	if err != nil {
-		return nil, err
-	}
-	err = embed.Init("ffmpeg")
-	if err != nil {
-		return nil, err
-	}
-
-	err = config.UpdateJSONConfig()
+	err := config.UpdateJSONConfig()
 	if err != nil {
 		return nil, err
 	}

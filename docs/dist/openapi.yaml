@@ -1,9 +1,9 @@
 swagger: "2.0"
 info:
     version: 1.0.0
-    title: GetYTStatsAPI
+    title: stream-recorder
     description: '
-        <p>Проект представляет собой API для получения статистики видео, подсчёта общего количества просмотров, и экспорта в CSV файл.</p>
+        <p>Проект представляет собой API для управления стримами, включая добавление, удаление, список и принудительную обрезку.</p>
 
         <p>По вопросам работы с API обращайтесь <a href="https://t.me/ra1ph_d">сюда</a>.</p>
         <p>Если вы обнаружили ошибку или у вас есть предложения по улучшению, создавайте issue на <a href="https://github.com/ra1phdd/GetYTStatsAPI">GitHub</a>.</p>
@@ -11,42 +11,88 @@ info:
         <h2>Как работать с документацией?</h2>
         <p>Для отправки запросов к API нажмите на кнопку Try it out и заполните необходимые поля для составления нужного фильтра.
         После заполнения полей нажмите на кнопку Execute и получите ответ от API и пример запроса.</p>'
-host: 91.215.21.236:8089
+host: 127.0.0.1:8000
 basePath: /
+schemes:
+  - http
 paths:
-    /get_command:
-        get:
-            summary: Получение статистики видео по идентификатору канала, ключевому слову для рекламы, дате начала и максимальному количеству результатов.
-            description: Этот эндпоинт возвращает команду для вставки в Excel (Google Sheets)
-            operationId: getCommandHandler
-            parameters:
-                - name: channel_id
-                  in: query
-                  required: true
-                  type: string
-                  description: ID канала на YouTube (пример, UCNPUUqi4kqjeaScWtsvfyvw)
-                - name: ad_word
-                  in: query
-                  required: true
-                  type: string
-                  description: Ключевое слово для рекламы из описания (пример, LOLZTEAM)
-                - name: start_date
-                  in: query
-                  required: true
-                  type: string
-                  format: string
-                  description: Дата старта рекламы в формате YYYY-MM-DD (пример, 2024-07-14)
-                - name: max_results
-                  in: query
-                  required: false
-                  type: integer
-                  description: Максимальное количество видео, по которым сервис будет осуществлять подсчёт статистики
-            responses:
-                '200':
-                    description: Команда для вставки в Excel (Google Sheets)
-                    schema:
-                        type: string
-                '500':
-                    description: Внутренняя ошибка сервера
-                    schema:
-                        type: string
+  /streamer/add:
+    get:
+      summary: "Добавить стримера"
+      description: "Добавляет стримера по платформе, имени пользователя и качеству."
+      operationId: addStreamer
+      parameters:
+        - name: platform
+          in: query
+          required: false
+          type: string
+          description: "Название платформы стримера"
+        - name: username
+          in: query
+          required: false
+          type: string
+          description: "Имя пользователя стримера"
+        - name: quality
+          in: query
+          required: false
+          type: string
+          description: "Качество потока"
+      responses:
+        '200':
+          description: "Успешное добавление стримера"
+          schema:
+            type: string
+  /streamer/delete:
+    get:
+      summary: "Удалить стримера"
+      description: "Удаляет стримера по платформе и имени пользователя."
+      operationId: deleteStreamer
+      parameters:
+        - name: platform
+          in: query
+          required: false
+          type: string
+          description: "Название платформы стримера"
+        - name: username
+          in: query
+          required: false
+          type: string
+          description: "Имя пользователя стримера"
+      responses:
+        '200':
+          description: "Успешное удаление стримера"
+          schema:
+            type: string
+  /streamer/list:
+    get:
+      summary: "Список стримеров"
+      description: "Получение списка всех стримеров."
+      operationId: listStreamers
+      responses:
+        '200':
+          description: "Успешное получение списка стримеров"
+          schema:
+            type: array
+            items:
+              type: string
+  /stream/cut:
+    get:
+      summary: "Обрезка потока"
+      description: "Позволяет обрезать поток по платформе и имени пользователя."
+      operationId: cutStream
+      parameters:
+        - name: platform
+          in: query
+          required: false
+          type: string
+          description: "Название платформы потока"
+        - name: username
+          in: query
+          required: false
+          type: string
+          description: "Имя пользователя потока"
+      responses:
+        '200':
+          description: "Успешное выполнение обрезки потока"
+          schema:
+            type: string

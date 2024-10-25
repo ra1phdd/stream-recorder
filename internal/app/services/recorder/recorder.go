@@ -178,6 +178,7 @@ func runFFmpegCommand(m3u8, path, username, platform string, configEnv *config.E
 			"-reconnect_at_eof", "1",
 			"-reconnect_streamed", "1",
 			"-reconnect_delay_max", "2",
+			"-http_persistent", "0",
 			"-c:v", configEnv.VideoCodec,
 			"-c:a", configEnv.AudioCodec,
 			"-segment_time", fmt.Sprint(configEnv.TimeSegment),
@@ -200,6 +201,7 @@ func runFFmpegCommand(m3u8, path, username, platform string, configEnv *config.E
 			"-reconnect_at_eof", "1",
 			"-reconnect_streamed", "1",
 			"-reconnect_delay_max", "2",
+			"-http_persistent", "0",
 			"-c:v", configEnv.VideoCodec,
 			"-c:a", configEnv.AudioCodec,
 			"'" + filename + "'",
@@ -228,8 +230,8 @@ func runFFmpegCommand(m3u8, path, username, platform string, configEnv *config.E
 }
 
 func createLogFile(username string) *os.File {
-	logger.Debug("Создание лог-файла ffmpeg", zap.String("path", fmt.Sprintf("logs/"+"ffmpeg-%s.log", username)))
-	logFile, err := os.Create(fmt.Sprintf("logs/"+"ffmpeg-%s.log", username))
+	logger.Debug("Создание лог-файла ffmpeg", zap.String("path", fmt.Sprintf("logs/ffmpeg-%s.log", username)))
+	logFile, err := os.Create(fmt.Sprintf("logs/ffmpeg-%s.log", username))
 	if err != nil {
 		logger.Warn("Ошибка создания лог-файла ffmpeg", zap.Error(err))
 	}
