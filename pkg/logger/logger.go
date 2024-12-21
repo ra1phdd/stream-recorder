@@ -2,16 +2,17 @@ package logger
 
 import (
 	"fmt"
-	"os"
-	"time"
-
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"log"
+	"os"
+	"time"
 )
 
 var logger *zap.Logger
+var logLevel zap.AtomicLevel
 
-func Init(loggerLevel string) {
+func Init() {
 	customTimeEncoder := func(t time.Time, enc zapcore.PrimitiveArrayEncoder) {
 		enc.AppendString(t.Format("2006-01-02 15:04:05"))
 	}
@@ -25,37 +26,39 @@ func Init(loggerLevel string) {
 
 	err := os.MkdirAll("logs", os.ModePerm)
 	if err != nil {
-		fmt.Println("Ошибка создания папки logs", err.Error())
-		return
+		log.Fatal("Ошибка создания папки logs", err.Error())
 	}
 	logFile, err := os.OpenFile("logs/stream-recorder.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
-		fmt.Println("Ошибка создания файла stream-recorder.log", err.Error())
-		return
+		log.Fatal("Ошибка создания файла stream-recorder.log", err.Error())
 	}
 	writer := zapcore.AddSync(logFile)
 
-	var defaultLogLevel zapcore.Level
-	switch loggerLevel {
-	case "debug":
-		defaultLogLevel = zapcore.DebugLevel
-	case "warn":
-		defaultLogLevel = zapcore.WarnLevel
-	case "error":
-		defaultLogLevel = zapcore.ErrorLevel
-	case "fatal":
-		defaultLogLevel = zapcore.FatalLevel
-	case "info":
-	default:
-		defaultLogLevel = zapcore.InfoLevel
-	}
+	logLevel = zap.NewAtomicLevel()
+	logLevel.SetLevel(zapcore.InfoLevel)
 
 	core := zapcore.NewTee(
-		zapcore.NewCore(fileEncoder, writer, defaultLogLevel),
-		zapcore.NewCore(consoleEncoder, zapcore.AddSync(os.Stdout), defaultLogLevel),
+		zapcore.NewCore(fileEncoder, writer, logLevel),
+		zapcore.NewCore(consoleEncoder, zapcore.AddSync(os.Stdout), logLevel),
 	)
-	logger = zap.New(core, zap.AddStacktrace(zapcore.ErrorLevel))
-	defer logger.Sync()
+	logger = zap.New(core, zap.AddStacktrace(zapcore.FatalLevel))
+}
+
+func SetLogLevel(level string) {
+	switch level {
+	case "debug":
+		logLevel.SetLevel(zapcore.DebugLevel)
+	case "warn":
+		logLevel.SetLevel(zapcore.WarnLevel)
+	case "error":
+		logLevel.SetLevel(zapcore.ErrorLevel)
+	case "fatal":
+		logLevel.SetLevel(zapcore.FatalLevel)
+	case "info":
+		logLevel.SetLevel(zapcore.InfoLevel)
+	default:
+		logLevel.SetLevel(zapcore.InfoLevel)
+	}
 }
 
 func Debug(message string, fields ...zap.Field) {
@@ -63,7 +66,7 @@ func Debug(message string, fields ...zap.Field) {
 }
 
 func Debugf(message string, username, platform string, fields ...zap.Field) {
-	logger.Debug(fmt.Sprintf("[%s/%s]", platform, username)+message, fields...)
+	logger.Debug(fmt.Sprintf("[%s/%s] ", platform, username)+message, fields...)
 }
 
 func Info(message string, fields ...zap.Field) {

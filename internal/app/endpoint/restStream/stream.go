@@ -1,28 +1,48 @@
 package restStream
 
 import (
+	"fmt"
 	"github.com/gin-gonic/gin"
-	"go.uber.org/zap"
+	"golang.org/x/time/rate"
 	"net/http"
-	"stream-recorder/config"
-	"stream-recorder/internal/app/services/tasks"
-	"stream-recorder/pkg/logger"
+	"stream-recorder/internal/app/services/m3u8"
+	"stream-recorder/internal/app/services/models"
+	"time"
 )
 
 type Endpoint struct {
-	Cfg *config.Env
+	am      map[string]*m3u8.M3u8
+	limiter *rate.Limiter
 }
 
-func (e Endpoint) CutStreamHandler(c *gin.Context) {
-	logger.Debug("Получение запроса на разделение стрима")
+func New(am map[string]*m3u8.M3u8) *Endpoint {
+	return &Endpoint{
+		am:      am,
+		limiter: rate.NewLimiter(rate.Every(60*time.Second), 1),
+	}
+}
 
-	exists, user := config.GetUser(c.Query("username"))
-	logger.Debug("Проверка на существование стримера в БД", zap.Bool("exists", exists))
+func (e *Endpoint) CutStreamHandler(c *gin.Context) {
+	s := models.Streamers{
+		Platform: c.Query("platform"),
+		Username: c.Query("username"),
+	}
 
-	if exists {
-		c.String(http.StatusOK, "успешно")
-		tasks.CutTask(e.Cfg, user.Platform, user.Username, user.Quality)
+	if s.Platform == "" || s.Username == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "platform or username is empty"})
+		return
+	}
+
+	if e.am[fmt.Sprintf("%s-%s", s.Platform, s.Username)] == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "the streamer is not broadcasting live"})
+		return
+	}
+
+	if e.limiter.Allow() {
+		e.am[fmt.Sprintf("%s-%s", s.Platform, s.Username)].ChangeIsNeedCut(true)
+		c.JSON(http.StatusOK, "success")
 	} else {
-		c.String(http.StatusOK, "ошибка, стример отсутствует в БД")
+		c.JSON(http.StatusTooManyRequests, gin.H{"error": "you can use cut no more than once per minute"})
+		return
 	}
 }

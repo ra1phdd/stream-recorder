@@ -1,4 +1,8 @@
 build/
+db/
 logs/
-*.json
+mnt/
+tmp/
+pkg/embed/ffmpeg/
 .env
+todo.txt

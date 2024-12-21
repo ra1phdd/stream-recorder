@@ -1,6 +1,6 @@
 swagger: "2.0"
 info:
-    version: 1.0.0
+    version: 2.0.0
     title: stream-recorder
     description: '
         <p>Проект представляет собой API для управления стримами, включая добавление, удаление, список и принудительную обрезку.</p>
@@ -19,7 +19,7 @@ paths:
   /streamer/add:
     get:
       summary: "Добавить стримера"
-      description: "Добавляет стримера по платформе, имени пользователя и качеству."
+      description: "Добавляет стримера в базу данных (требует параметры - платформа (пример: twitch, youtube, kick и т.д.), имя пользователя и качество (пример: best, 1080p, 720p))."
       operationId: addStreamer
       parameters:
         - name: platform
@@ -45,7 +45,7 @@ paths:
   /streamer/delete:
     get:
       summary: "Удалить стримера"
-      description: "Удаляет стримера по платформе и имени пользователя."
+      description: "Удаляет стримера из базы данных (требует параметры - платформа (пример: twitch, youtube, kick и т.д.), имя пользователя)."
       operationId: deleteStreamer
       parameters:
         - name: platform
@@ -66,7 +66,7 @@ paths:
   /streamer/list:
     get:
       summary: "Список стримеров"
-      description: "Получение списка всех стримеров."
+      description: "Получение списка всех стримеров, добавленных в базу данных."
       operationId: listStreamers
       responses:
         '200':
@@ -78,7 +78,7 @@ paths:
   /stream/cut:
     get:
       summary: "Обрезка потока"
-      description: "Позволяет обрезать поток по платформе и имени пользователя."
+      description: "Позволяет обрезать поток в нужный момент (требует параметры - платформа (пример: twitch, youtube, kick и т.д.), имя пользователя)."
       operationId: cutStream
       parameters:
         - name: platform
