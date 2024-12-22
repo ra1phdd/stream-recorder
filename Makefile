@@ -1,24 +1,30 @@
 .PHONY: test cover build
 
-# Переменные
 BUILD_DIR := build
+TARGETS := darwin/amd64 darwin/arm64 linux/amd64 linux/arm64 windows/amd64 windows/arm64
+SERVER_SRC := ./cmd/server/server.go
+CLIENT_SRC := ./cmd/client/client.go
 
-# Юнит тесты и покрытие кода
 test:
 	go test -race -count 1 ./...
 
 cover:
 	go test -short -race -count 1 -coverprofile=coverage.out ./...
 	go tool cover -html=coverage.out
-	rm coverage.out
+	rm -f coverage.out
 
-# Сборка
+define build_target
+	GOOS=$(1) GOARCH=$(2) CGO_ENABLED=0 go build -o $(BUILD_DIR)/$(3)_$(1)_$(2)$(if $(findstring windows,$(1)),.exe) $(4)
+endef
+
 build:
 	mkdir -p $(BUILD_DIR)
 	rm -rf $(BUILD_DIR)/*
-	GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build -o $(BUILD_DIR)/stream-recorder_darwin_amd64 ./cmd/main/main.go
-	GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -o $(BUILD_DIR)/stream-recorder_darwin_arm64 ./cmd/main/main.go
-	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o $(BUILD_DIR)/stream-recorder_linux_amd64 ./cmd/main/main.go
-	GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o $(BUILD_DIR)/stream-recorder_linux_arm64 ./cmd/main/main.go
-	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o $(BUILD_DIR)/stream-recorder_windows_amd64.exe ./cmd/main/main.go
-	GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go build -o $(BUILD_DIR)/stream-recorder_windows_arm64.exe ./cmd/main/main.go
+
+	@echo "Начинаем сборку сервера..."
+	$(foreach target, $(TARGETS), \
+		$(call build_target,$(word 1,$(subst /, ,$(target))),$(word 2,$(subst /, ,$(target))),stream-recorder_server,$(SERVER_SRC);))
+
+	@echo "Начинаем сборку клиента..."
+	$(foreach target, $(TARGETS), \
+		$(call build_target,$(word 1,$(subst /, ,$(target))),$(word 2,$(subst /, ,$(target))),stream-recorder_client,$(CLIENT_SRC);))
