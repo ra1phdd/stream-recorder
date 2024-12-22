@@ -12,13 +12,13 @@ import (
 
 type Endpoint struct {
 	am      map[string]*m3u8.M3u8
-	limiter *rate.Limiter
+	limiter map[string]*rate.Limiter
 }
 
 func New(am map[string]*m3u8.M3u8) *Endpoint {
 	return &Endpoint{
 		am:      am,
-		limiter: rate.NewLimiter(rate.Every(60*time.Second), 1),
+		limiter: make(map[string]*rate.Limiter),
 	}
 }
 
@@ -33,12 +33,14 @@ func (e *Endpoint) CutStreamHandler(c *gin.Context) {
 		return
 	}
 
+	e.limiter[fmt.Sprintf("%s-%s", s.Platform, s.Username)] = rate.NewLimiter(rate.Every(60*time.Second), 1)
+
 	if e.am[fmt.Sprintf("%s-%s", s.Platform, s.Username)] == nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "the streamer is not broadcasting live"})
 		return
 	}
 
-	if e.limiter.Allow() {
+	if e.limiter[fmt.Sprintf("%s-%s", s.Platform, s.Username)].Allow() {
 		e.am[fmt.Sprintf("%s-%s", s.Platform, s.Username)].ChangeIsNeedCut(true)
 		c.JSON(http.StatusOK, "success")
 	} else {

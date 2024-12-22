@@ -58,7 +58,7 @@ func (f *Ffmpeg) Run(filePath, output string) error {
 		return err
 	}
 
-	logger.Debug("ffmpeg started successfully", zap.Any("cmd", f.cmd), zap.String("filepath", filePath), zap.String("output", output))
+	logger.Debug("ffmpeg started successfully", zap.Any("cmd", f.cmd))
 	return nil
 }
 
@@ -85,7 +85,8 @@ func (f *Ffmpeg) waitForExit(cmd *exec.Cmd, filePath string) {
 			if strings.HasPrefix(line, "file '") {
 				name := strings.TrimSuffix(strings.TrimPrefix(line, "file '"), "'")
 
-				err := os.Remove(filepath.Join(f.c.TempPATH, name))
+				dir, _ := filepath.Split(filePath)
+				err := os.Remove(filepath.Join(dir, name))
 				if err != nil {
 					logger.Error("Error when deleting a chunk file from tmp", zap.String("filename", name), zap.Error(err))
 				} else {

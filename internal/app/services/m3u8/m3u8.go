@@ -21,9 +21,10 @@ import (
 )
 
 type M3u8 struct {
-	f  *ffmpeg.Ffmpeg
-	c  *config.Config
-	st *streamlink.TwitchAPI
+	HTTPClient *http.Client
+	f          *ffmpeg.Ffmpeg
+	c          *config.Config
+	st         *streamlink.TwitchAPI
 
 	sm        *models.StreamMetadata
 	isNeedCut bool
@@ -35,8 +36,9 @@ type M3u8 struct {
 
 func New(platform, username string, splitSegments bool, timeSegment int, rp *runner.Process, c *config.Config) *M3u8 {
 	return &M3u8{
-		f: ffmpeg.New(rp, c),
-		c: c,
+		HTTPClient: &http.Client{Timeout: 60 * time.Second},
+		f:          ffmpeg.New(rp, c),
+		c:          c,
 		sm: &models.StreamMetadata{
 			SkipTargetDuration:  false,
 			TotalDurationStream: 0,
@@ -54,26 +56,28 @@ func New(platform, username string, splitSegments bool, timeSegment int, rp *run
 	}
 }
 
-func (m *M3u8) FetchPlaylist(url string, parseM3u8 func(string, *models.StreamMetadata) (int, bool, string)) ([]string, error) {
-	resp, err := http.Get(url)
+func (m *M3u8) FetchPlaylist(url string, parseM3u8 func(string, *models.StreamMetadata) (int, bool, string)) ([]string, bool, error) {
+	resp, err := m.HTTPClient.Get(url)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		logger.Errorf("Failed to fetch master playlist", m.sm.Username, m.sm.Platform, zap.Int("status_code", resp.StatusCode))
-		return nil, errors.New("failed to fetch master playlist")
+		return nil, false, errors.New("failed to fetch master playlist")
 	}
 
 	var segments []string
 	scanner := bufio.NewScanner(resp.Body)
 	skipCount := 0
+	isSkipSegments := false
 
 	for scanner.Scan() {
 		line := scanner.Text()
 
 		if skipCount > 0 {
+			isSkipSegments = true
 			skipCount--
 			continue
 		}
@@ -88,16 +92,16 @@ func (m *M3u8) FetchPlaylist(url string, parseM3u8 func(string, *models.StreamMe
 
 	if err := scanner.Err(); err != nil {
 		logger.Errorf("Buffer scanning error", m.sm.Username, m.sm.Platform, zap.Error(err))
-		return nil, err
+		return nil, isSkipSegments, err
 	}
 
-	return segments, nil
+	return segments, isSkipSegments, nil
 }
 
 func (m *M3u8) DownloadSegment(url string) error {
 	logger.Debugf("Starting download segment", m.sm.Username, m.sm.Platform, zap.String("url", url))
 
-	resp, err := http.Get(url)
+	resp, err := m.HTTPClient.Get(url)
 	if err != nil {
 		logger.Errorf("Failed to download segment", m.sm.Username, m.sm.Platform, zap.String("url", url), zap.Error(err))
 		return err
@@ -110,7 +114,11 @@ func (m *M3u8) DownloadSegment(url string) error {
 	}
 
 	fileName := m.GetShortFileName(url)
-	filePath := filepath.Join(m.c.TempPATH, fileName)
+	filePath := filepath.Join(
+		m.c.TempPATH,
+		fmt.Sprintf("%s_%s_%s", m.sm.Platform, m.sm.Username, time.Now().Format("2006-01-02")),
+		fileName,
+	)
 	logger.Debugf("Creating file for segment", m.sm.Username, m.sm.Platform, zap.String("filePath", filePath))
 
 	file, err := os.Create(filePath)
@@ -142,22 +150,20 @@ func (m *M3u8) Run(playlistURL string) error {
 		return errors.New("playlistURL is empty")
 	}
 
-	_, err := os.Stat(m.c.TempPATH)
-	if os.IsNotExist(err) {
-		logger.Debug("Directory does not exist. Creating...", zap.String("outputDir", m.c.TempPATH))
-		err := os.Mkdir(m.c.TempPATH, os.ModePerm)
-		if err != nil {
-			return fmt.Errorf("failed to create directory: %w", err)
-		}
-		logger.Debug("Directory created successfully", zap.String("outputDir", m.c.TempPATH))
-		return nil
+	streamDir := fmt.Sprintf("%s_%s_%s", m.sm.Platform, m.sm.Username, time.Now().Format("2006-01-02"))
+	if err := m.createDirectoryIfNotExist(filepath.Join(m.c.TempPATH, streamDir)); err != nil {
+		return err
+	}
+	if err := m.createDirectoryIfNotExist(filepath.Join(m.c.MediaPATH, streamDir)); err != nil {
+		return err
 	}
 
 	for {
 		var segments []string
+		var err error
 		switch m.sm.Platform {
 		case "twitch":
-			segments, err = m.FetchPlaylist(playlistURL, m.st.ParseM3u8)
+			segments, _, err = m.FetchPlaylist(playlistURL, m.st.ParseM3u8)
 		}
 		if err != nil {
 			logger.Errorf("Error fetching playlist", m.sm.Username, m.sm.Platform, zap.String("playlistURL", playlistURL), zap.Error(err))
@@ -165,49 +171,38 @@ func (m *M3u8) Run(playlistURL string) error {
 			continue
 		}
 
-		for _, segment := range segments {
-			url := m.GetShortFileName(segment)
-
-			if !m.contains(m.downloadedSegments, url) && !m.contains(m.rottenDownloadedSegments, url) {
-				err := m.DownloadSegment(segment)
-				if err != nil {
-					logger.Errorf("Error downloading segment", m.sm.Username, m.sm.Platform, zap.String("segmentURL", segment), zap.Error(err))
-					continue
-				}
-				m.downloadedSegments = append(m.downloadedSegments, url)
-			}
-		}
+		m.processSegments(segments)
 
 		if (m.sm.SplitSegments && m.sm.TotalDurationStream-m.sm.StartDurationStream > time.Duration(m.sm.TimeSegment)*time.Second) || m.isNeedCut || m.isCancel {
-			fileSegments := filepath.Join(m.c.TempPATH, fmt.Sprintf("%s-%s-%s.txt", m.sm.Platform, m.sm.Username, m.sm.StartDurationStream))
-			filePathWithoutExtension := filepath.Join(m.c.MediaPATH, fmt.Sprintf("%s-%s-%s", m.sm.Platform, m.sm.Username, m.sm.StartDurationStream))
-			logger.Infof("Creating segment file", m.sm.Username, m.sm.Platform, zap.String("fileSegments", fileSegments), zap.String("filepath", filePathWithoutExtension))
+			fileSegments := filepath.Join(
+				m.c.TempPATH,
+				fmt.Sprintf("%s_%s_%s", m.sm.Platform, m.sm.Username, time.Now().Format("2006-01-02")),
+				fmt.Sprintf("%s_%s_%s.txt", m.sm.Platform, m.sm.Username, m.sm.StartDurationStream),
+			)
+			filePathWithoutExtension := filepath.Join(
+				m.c.MediaPATH,
+				fmt.Sprintf("%s_%s_%s", m.sm.Platform, m.sm.Username, time.Now().Format("2006-01-02")),
+				fmt.Sprintf("%s_%s_%s", m.sm.Platform, m.sm.Username, m.sm.StartDurationStream),
+			)
 
-			file, err := os.Create(fileSegments)
-			if err != nil {
-				logger.Errorf("Error creating segment file", m.sm.Username, m.sm.Platform, zap.String("fileSegments", fileSegments), zap.Error(err))
-				return err
-			}
+			if len(m.downloadedSegments) != 0 {
+				logger.Infof("Creating segment file", m.sm.Username, m.sm.Platform, zap.String("fileSegments", fileSegments), zap.String("filepath", filePathWithoutExtension))
 
-			for _, key := range m.downloadedSegments {
-				_, err := file.WriteString(fmt.Sprintf("file '%s'\n", key))
-				if err != nil {
-					logger.Errorf("Error writing to segment file", m.sm.Username, m.sm.Platform, zap.String("fileSegments", fileSegments), zap.Error(err))
+				if err := m.createSegmentFile(fileSegments); err != nil {
 					return err
 				}
-			}
-			file.Close()
 
-			err = m.f.Run(fileSegments, filePathWithoutExtension)
-			if err != nil {
-				logger.Errorf("Error running external process", m.sm.Username, m.sm.Platform, zap.String("fileSegments", fileSegments), zap.String("filepath", filePathWithoutExtension), zap.Error(err))
+				if err := m.f.Run(fileSegments, filePathWithoutExtension); err != nil {
+					logger.Errorf("Error running external process", m.sm.Username, m.sm.Platform, zap.String("fileSegments", fileSegments), zap.String("filepath", filePathWithoutExtension), zap.Error(err))
+				}
+
+				logger.Infof("Completed segment processing", m.sm.Username, m.sm.Platform, zap.String("filepath", filePathWithoutExtension))
 			}
 
 			m.sm.StartDurationStream = 0
 			m.rottenDownloadedSegments = m.downloadedSegments
 			m.downloadedSegments = m.downloadedSegments[:0]
 			m.isNeedCut = false
-			logger.Infof("Completed segment processing", m.sm.Username, m.sm.Platform, zap.String("filepath", filePathWithoutExtension))
 
 			if m.isCancel {
 				break
@@ -217,6 +212,48 @@ func (m *M3u8) Run(playlistURL string) error {
 		time.Sleep(m.sm.WaitingTime)
 	}
 
+	return nil
+}
+
+func (m *M3u8) createDirectoryIfNotExist(path string) error {
+	_, err := os.Stat(path)
+	if os.IsNotExist(err) {
+		logger.Debug("Directory does not exist. Creating...", zap.String("outputDir", path))
+		if err := os.Mkdir(path, os.ModePerm); err != nil {
+			return fmt.Errorf("failed to create directory: %w", err)
+		}
+		logger.Debug("Directory created successfully", zap.String("outputDir", path))
+	}
+	return nil
+}
+
+func (m *M3u8) processSegments(segments []string) {
+	for _, segment := range segments {
+		url := m.GetShortFileName(segment)
+		if !m.contains(m.downloadedSegments, url) && !m.contains(m.rottenDownloadedSegments, url) {
+			if err := m.DownloadSegment(segment); err != nil {
+				logger.Errorf("Error downloading segment", m.sm.Username, m.sm.Platform, zap.String("segmentURL", segment), zap.Error(err))
+			} else {
+				m.downloadedSegments = append(m.downloadedSegments, url)
+			}
+		}
+	}
+}
+
+func (m *M3u8) createSegmentFile(fileSegments string) error {
+	file, err := os.Create(fileSegments)
+	if err != nil {
+		logger.Errorf("Error creating segment file", m.sm.Username, m.sm.Platform, zap.String("fileSegments", fileSegments), zap.Error(err))
+		return err
+	}
+	defer file.Close()
+
+	for _, segment := range m.downloadedSegments {
+		if _, err := file.WriteString(fmt.Sprintf("file '%s'\n", segment)); err != nil {
+			logger.Errorf("Error writing to segment file", m.sm.Username, m.sm.Platform, zap.String("fileSegments", fileSegments), zap.Error(err))
+			return err
+		}
+	}
 	return nil
 }
 

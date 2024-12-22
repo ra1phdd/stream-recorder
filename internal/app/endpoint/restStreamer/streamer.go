@@ -66,12 +66,22 @@ func (e *Endpoint) AddStreamerHandler(c *gin.Context) {
 		return
 	}
 
-	err = e.sr.Add(s)
+	isFound, err := e.sr.IsFoundStreamer(s)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, "success")
+
+	if !isFound {
+		err = e.sr.Add(s)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, "success")
+		return
+	}
+	c.JSON(http.StatusInternalServerError, gin.H{"error": "the streamer already exists in the DB"})
 }
 
 func (e *Endpoint) DeleteStreamerHandler(c *gin.Context) {

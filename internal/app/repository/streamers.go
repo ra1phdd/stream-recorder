@@ -65,29 +65,22 @@ func (sr *StreamersRepository) Get() ([]models.Streamers, error) {
 	return s, nil
 }
 
-func (sr *StreamersRepository) GetById(id int) (models.Streamers, error) {
-	logger.Debug("Fetching streamer by id", zap.Int("id", id))
-	var s models.Streamers
+func (sr *StreamersRepository) IsFoundStreamer(s models.Streamers) (bool, error) {
+	logger.Debug("Founding streamer in DB", zap.Any("s", s))
 
-	rows, err := db.Conn.Query(`SELECT platform, username, quality, split_segments, time_segment FROM streamers WHERE id = $1`, id)
+	var id int
+	err := db.Conn.QueryRow(`SELECT id FROM streamers WHERE username = $1 AND platform = $2`, s.Username, s.Platform).Scan(&id)
 	if err != nil {
-		return models.Streamers{}, err
-	}
-	defer func(rows *sql.Rows) {
-		err := rows.Close()
-		if err != nil {
-			logger.Error("Failed to close streamer rows", zap.Error(err))
+		if errors.Is(err, sql.ErrNoRows) {
+			logger.Debug("Streamer not found", zap.Any("streamer", s))
+			return false, nil
 		}
-	}(rows)
-
-	err = rows.Scan(&s.Platform, &s.Username, &s.Quality, &s.SplitSegments, &s.TimeSegment)
-	if err != nil {
-		logger.Error("Failed to fetch streamers", zap.Error(err))
-		return models.Streamers{}, err
+		logger.Error("Database query failed", zap.Error(err))
+		return false, err
 	}
 
-	logger.Debug("Streamer fetched successfully", zap.Any("streamer", s))
-	return s, nil
+	logger.Debug("Streamer found successfully", zap.Int("id", id), zap.Any("streamer", s))
+	return true, nil
 }
 
 func (sr *StreamersRepository) Add(s models.Streamers) error {

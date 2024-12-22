@@ -40,7 +40,7 @@ const (
 
 func NewTwitch(clientId, deviceId string) *TwitchAPI {
 	return &TwitchAPI{
-		HTTPClient: &http.Client{Timeout: 10 * time.Second},
+		HTTPClient: &http.Client{Timeout: 60 * time.Second},
 		ClientID:   clientId,
 		DeviceID:   deviceId,
 	}
@@ -222,7 +222,7 @@ func (t *TwitchAPI) GetMasterPlaylist(channel string) (string, error) {
 		return "", err
 	}
 
-	return fmt.Sprintf("%s/api/channel/hls/%s.m3u8?player=twitchweb&p=605468&type=any&allow_source=true&allow_audio_only=true&allow_spectre=false&sig=%s&token=%s", UsherURL, channel, accessToken["signature"].(string), url.QueryEscape(accessToken["value"].(string))), nil
+	return fmt.Sprintf("%s/api/channel/hls/%s.m3u8?player=twitchweb&platform=web&supported_codecs=h265,h264&p=605468&type=any&allow_source=true&allow_audio_only=true&allow_spectre=false&sig=%s&token=%s", UsherURL, channel, accessToken["signature"].(string), url.QueryEscape(accessToken["value"].(string))), nil
 }
 
 func (t *TwitchAPI) FindMediaPlaylist(masterPlaylist, quality string) (string, error) {
