@@ -53,7 +53,7 @@ func CreateFile(name string, dir string, fs embed.FS) error {
 }
 
 func GetTempFileName(name string) string {
-	c, err := config.New()
+	c, err := config.New("config.json", "")
 	if err == nil && c.FFmpegPATH != "" {
 		return c.FFmpegPATH
 	}

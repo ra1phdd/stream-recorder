@@ -1,13 +1,9 @@
 package app
 
 import (
-	"fmt"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 	"stream-recorder/internal/app/config"
-	"stream-recorder/internal/app/endpoint/restStream"
-	"stream-recorder/internal/app/endpoint/restStreamer"
-	"stream-recorder/internal/app/middlewares/noCache"
 	"stream-recorder/internal/app/repository"
 	"stream-recorder/internal/app/services/m3u8"
 	"stream-recorder/internal/app/services/runner"
@@ -20,47 +16,44 @@ import (
 )
 
 type App struct {
-	router        *gin.Engine
-	cfg           *config.Config
-	streamersRepo *repository.StreamersRepository
-	runnerProcess *runner.Process
-	sl            *streamlink.Streamlink
-	check         *streams.Streams
+	Router        *gin.Engine
+	Cfg           *config.Config
+	StreamersRepo *repository.StreamersRepository
+	RunnerProcess *runner.Process
+	Streamlink    *streamlink.Streamlink
+	CheckStreams  *streams.Streams
+
+	ActiveM3u8 map[string]*m3u8.M3u8
 }
 
-var activeStreamers = make(map[string]bool)
-var activeM3u8 = make(map[string]*m3u8.M3u8)
-
-func New() error {
+func New(workMode string) (*App, error) {
 	logger.Init()
 
 	if err := embedded.Init(); err != nil {
-		return err
+		return nil, err
 	}
 
 	if err := db.Init("db/stream-recorder.db"); err != nil {
-		return err
+		return nil, err
 	}
 
-	a := setupApplication()
+	a := setupApplication(workMode)
 
-	a.router = gin.Default()
-	newRest(a)
-	return runRest(a.router, a.cfg.Port)
+	return a, nil
 }
 
-func setupApplication() *App {
+func setupApplication(workMode string) *App {
 	var a = &App{}
+	a.ActiveM3u8 = make(map[string]*m3u8.M3u8)
 
 	var err error
-	a.cfg, err = config.New()
+	a.Cfg, err = config.New("config.json", workMode)
 	if err != nil {
 		logger.Fatal("Error loading config", zap.Error(err))
 		return nil
 	}
 
-	logger.SetLogLevel(a.cfg.LoggerLevel)
-	gin.SetMode(a.cfg.GinMode)
+	logger.SetLogLevel(a.Cfg.LoggerLevel)
 
 	err = tmp.Clear("tmp")
 	if err != nil {
@@ -68,35 +61,12 @@ func setupApplication() *App {
 		return nil
 	}
 
-	a.streamersRepo = repository.NewStreamers()
-	a.runnerProcess = runner.NewProcess()
+	a.StreamersRepo = repository.NewStreamers()
+	a.RunnerProcess = runner.NewProcess()
 
-	a.sl = streamlink.New()
-	a.check = streams.New(a.streamersRepo, a.sl, a.runnerProcess, a.cfg, activeStreamers, activeM3u8)
+	a.Streamlink = streamlink.New()
+	a.CheckStreams = streams.New(a.StreamersRepo, a.Streamlink, a.RunnerProcess, a.Cfg, a.ActiveM3u8)
 
-	go a.check.CheckingForStreams()
+	go a.CheckStreams.CheckingForStreams()
 	return a
-}
-
-func newRest(a *App) {
-	a.router.Use(noCache.NoCacheMiddleware())
-
-	// регистрируем эндпоинты
-	serviceStreamer := restStreamer.New(a.streamersRepo)
-	serviceStream := restStream.New(activeM3u8)
-
-	// регистрируем маршруты
-	a.router.GET("/streamer/list", serviceStreamer.GetListStreamersHandler)
-	a.router.GET("/streamer/add", serviceStreamer.AddStreamerHandler)
-	a.router.GET("/streamer/delete", serviceStreamer.DeleteStreamerHandler)
-	a.router.GET("/stream/cut", serviceStream.CutStreamHandler)
-}
-
-func runRest(router *gin.Engine, port int) error {
-	err := router.Run(fmt.Sprintf(":%d", port))
-	if err != nil {
-		return err
-	}
-
-	return nil
 }

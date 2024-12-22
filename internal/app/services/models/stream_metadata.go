@@ -8,4 +8,6 @@ type StreamMetadata struct {
 	TotalDurationStream time.Duration
 	StartDurationStream time.Duration
 	Username, Platform  string
+	SplitSegments       bool
+	TimeSegment         int
 }

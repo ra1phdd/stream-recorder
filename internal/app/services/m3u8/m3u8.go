@@ -27,12 +27,13 @@ type M3u8 struct {
 
 	sm        *models.StreamMetadata
 	isNeedCut bool
+	isCancel  bool
 
 	rottenDownloadedSegments []string
 	downloadedSegments       []string
 }
 
-func New(platform, username string, rp *runner.Process, c *config.Config) *M3u8 {
+func New(platform, username string, splitSegments bool, timeSegment int, rp *runner.Process, c *config.Config) *M3u8 {
 	return &M3u8{
 		f: ffmpeg.New(rp, c),
 		c: c,
@@ -43,10 +44,13 @@ func New(platform, username string, rp *runner.Process, c *config.Config) *M3u8 
 			WaitingTime:         1,
 			Username:            username,
 			Platform:            platform,
+			SplitSegments:       splitSegments,
+			TimeSegment:         timeSegment,
 		},
 		isNeedCut:                false,
 		rottenDownloadedSegments: make([]string, 0),
 		downloadedSegments:       make([]string, 0),
+		isCancel:                 false,
 	}
 }
 
@@ -133,7 +137,7 @@ func (m *M3u8) GetShortFileName(url string) string {
 }
 
 func (m *M3u8) Run(playlistURL string) error {
-	logger.Infof("Starting playlist monitoring", m.sm.Username, m.sm.Platform, zap.String("playlistURL", playlistURL))
+	logger.Debugf("Starting playlist monitoring", m.sm.Username, m.sm.Platform, zap.String("playlistURL", playlistURL))
 	if playlistURL == "" {
 		return errors.New("playlistURL is empty")
 	}
@@ -174,7 +178,7 @@ func (m *M3u8) Run(playlistURL string) error {
 			}
 		}
 
-		if (m.c.SplitSegments && m.sm.TotalDurationStream-m.sm.StartDurationStream > time.Duration(m.c.TimeSegment)*time.Second) || m.isNeedCut {
+		if (m.sm.SplitSegments && m.sm.TotalDurationStream-m.sm.StartDurationStream > time.Duration(m.sm.TimeSegment)*time.Second) || m.isNeedCut || m.isCancel {
 			fileSegments := filepath.Join(m.c.TempPATH, fmt.Sprintf("%s-%s-%s.txt", m.sm.Platform, m.sm.Username, m.sm.StartDurationStream))
 			filePathWithoutExtension := filepath.Join(m.c.MediaPATH, fmt.Sprintf("%s-%s-%s", m.sm.Platform, m.sm.Username, m.sm.StartDurationStream))
 			logger.Infof("Creating segment file", m.sm.Username, m.sm.Platform, zap.String("fileSegments", fileSegments), zap.String("filepath", filePathWithoutExtension))
@@ -204,10 +208,16 @@ func (m *M3u8) Run(playlistURL string) error {
 			m.downloadedSegments = m.downloadedSegments[:0]
 			m.isNeedCut = false
 			logger.Infof("Completed segment processing", m.sm.Username, m.sm.Platform, zap.String("filepath", filePathWithoutExtension))
+
+			if m.isCancel {
+				break
+			}
 		}
 
 		time.Sleep(m.sm.WaitingTime)
 	}
+
+	return nil
 }
 
 func (m *M3u8) contains(slice []string, item string) bool {
@@ -221,4 +231,8 @@ func (m *M3u8) contains(slice []string, item string) bool {
 
 func (m *M3u8) ChangeIsNeedCut(value bool) {
 	m.isNeedCut = value
+}
+
+func (m *M3u8) ChangeIsCancel(value bool) {
+	m.isCancel = value
 }

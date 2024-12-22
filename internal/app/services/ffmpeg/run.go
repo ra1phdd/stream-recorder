@@ -104,6 +104,7 @@ func (f *Ffmpeg) waitForExit(cmd *exec.Cmd, filePath string) {
 		} else {
 			logger.Debug("Deleted a txt file from ffmpeg in tmp", zap.String("filepath", filePath))
 		}
+		logger.Info("Segment is recorded", zap.String("filepath", filePath))
 	}
 }
 

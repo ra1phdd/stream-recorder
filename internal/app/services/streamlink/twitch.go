@@ -69,7 +69,7 @@ func RandomToken(length int, choices string) (string, error) {
 }
 
 func (t *TwitchAPI) fetchIntegrity() (string, error) {
-	logger.Info("Fetching client integrity token", zap.String("url", IntegrityURL))
+	logger.Debug("Fetching client integrity token", zap.String("url", IntegrityURL))
 
 	req, err := http.NewRequest("POST", IntegrityURL, nil)
 	if err != nil {
@@ -103,7 +103,7 @@ func (t *TwitchAPI) fetchIntegrity() (string, error) {
 		return "", err
 	}
 
-	logger.Info("Successfully fetched integrity token")
+	logger.Debug("Successfully fetched integrity token")
 	return integrityResp.Token, nil
 }
 
@@ -121,7 +121,7 @@ func (t *TwitchAPI) gqlPersistedQuery(operationName, sha256Hash string, variable
 }
 
 func (t *TwitchAPI) call(data interface{}) (interface{}, error) {
-	logger.Info("Making TwitchAPI call", zap.String("url", GqlURL))
+	logger.Debug("Making TwitchAPI call", zap.String("url", GqlURL))
 
 	ci, err := t.fetchIntegrity()
 	if err != nil {
@@ -168,12 +168,12 @@ func (t *TwitchAPI) call(data interface{}) (interface{}, error) {
 		return nil, err
 	}
 
-	logger.Info("TwitchAPI call successful")
+	logger.Debug("TwitchAPI call successful")
 	return result, nil
 }
 
 func (t *TwitchAPI) accessToken(channel string) (map[string]interface{}, error) {
-	logger.Info("Fetching access token", zap.String("channel", channel))
+	logger.Debug("Fetching access token", zap.String("channel", channel))
 
 	variables := map[string]interface{}{
 		"isLive":     true,
@@ -208,7 +208,7 @@ func (t *TwitchAPI) accessToken(channel string) (map[string]interface{}, error) 
 		return nil, errors.New("streamPlaybackAccessToken not found")
 	}
 
-	logger.Info("Access token fetched successfully", zap.String("channel", channel))
+	logger.Debug("Access token fetched successfully", zap.String("channel", channel))
 	return map[string]interface{}{
 		"signature": streamToken["signature"],
 		"value":     streamToken["value"],

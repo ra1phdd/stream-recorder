@@ -5,4 +5,5 @@ mnt/
 tmp/
 pkg/embed/ffmpeg/
 .env
+config.json
 todo.txt

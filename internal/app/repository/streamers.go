@@ -19,7 +19,7 @@ func (sr *StreamersRepository) Get() ([]models.Streamers, error) {
 	logger.Debug("Fetching streamers")
 	var s []models.Streamers
 
-	rows, err := db.Conn.Query(`SELECT id, platform, username, quality FROM streamers`)
+	rows, err := db.Conn.Query(`SELECT id, platform, username, quality, split_segments, time_segment FROM streamers`)
 	if err != nil {
 		return nil, err
 	}
@@ -32,21 +32,24 @@ func (sr *StreamersRepository) Get() ([]models.Streamers, error) {
 
 	found := false
 	var (
-		id                          int
+		id, timeSegment             int
 		platform, username, quality string
+		splitSegments               bool
 	)
 	for rows.Next() {
-		err := rows.Scan(&id, &platform, &username, &quality)
+		err := rows.Scan(&id, &platform, &username, &quality, &splitSegments, &timeSegment)
 		if err != nil {
 			logger.Error("Failed to fetch streamers", zap.Error(err))
 			return nil, err
 		}
 
 		item := models.Streamers{
-			ID:       id,
-			Platform: platform,
-			Username: username,
-			Quality:  quality,
+			ID:            id,
+			Platform:      platform,
+			Username:      username,
+			Quality:       quality,
+			SplitSegments: splitSegments,
+			TimeSegment:   timeSegment,
 		}
 
 		s = append(s, item)
@@ -66,7 +69,7 @@ func (sr *StreamersRepository) GetById(id int) (models.Streamers, error) {
 	logger.Debug("Fetching streamer by id", zap.Int("id", id))
 	var s models.Streamers
 
-	rows, err := db.Conn.Query(`SELECT platform, username, quality FROM streamers WHERE id = $1`, id)
+	rows, err := db.Conn.Query(`SELECT platform, username, quality, split_segments, time_segment FROM streamers WHERE id = $1`, id)
 	if err != nil {
 		return models.Streamers{}, err
 	}
@@ -77,7 +80,7 @@ func (sr *StreamersRepository) GetById(id int) (models.Streamers, error) {
 		}
 	}(rows)
 
-	err = rows.Scan(&s.Platform, &s.Username, &s.Quality)
+	err = rows.Scan(&s.Platform, &s.Username, &s.Quality, &s.SplitSegments, &s.TimeSegment)
 	if err != nil {
 		logger.Error("Failed to fetch streamers", zap.Error(err))
 		return models.Streamers{}, err
@@ -90,7 +93,7 @@ func (sr *StreamersRepository) GetById(id int) (models.Streamers, error) {
 func (sr *StreamersRepository) Add(s models.Streamers) error {
 	logger.Debug("Adding new row in table streamers", zap.Any("streamers", s))
 
-	_, err := db.Conn.Exec(`INSERT INTO streamers (platform, username, quality) VALUES ($1, $2, $3)`, s.Platform, s.Username, s.Quality)
+	_, err := db.Conn.Exec(`INSERT INTO streamers (platform, username, quality, split_segments, time_segment) VALUES ($1, $2, $3, $4, $5)`, s.Platform, s.Username, s.Quality, s.SplitSegments, s.TimeSegment)
 	if err != nil {
 		logger.Error("Failed to add new row in table streamers", zap.Error(err))
 		return err

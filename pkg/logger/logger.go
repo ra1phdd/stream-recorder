@@ -11,6 +11,9 @@ import (
 
 var logger *zap.Logger
 var logLevel zap.AtomicLevel
+var fileEncoder zapcore.Encoder
+var consoleEncoder zapcore.Encoder
+var writer zapcore.WriteSyncer
 
 func Init() {
 	customTimeEncoder := func(t time.Time, enc zapcore.PrimitiveArrayEncoder) {
@@ -21,8 +24,8 @@ func Init() {
 	config.EncodeLevel = zapcore.LowercaseLevelEncoder
 	config.EncodeTime = customTimeEncoder
 
-	fileEncoder := zapcore.NewJSONEncoder(config)
-	consoleEncoder := zapcore.NewConsoleEncoder(config)
+	fileEncoder = zapcore.NewJSONEncoder(config)
+	consoleEncoder = zapcore.NewConsoleEncoder(config)
 
 	err := os.MkdirAll("logs", os.ModePerm)
 	if err != nil {
@@ -32,16 +35,12 @@ func Init() {
 	if err != nil {
 		log.Fatal("Ошибка создания файла stream-recorder.log", err.Error())
 	}
-	writer := zapcore.AddSync(logFile)
+	writer = zapcore.AddSync(logFile)
 
 	logLevel = zap.NewAtomicLevel()
 	logLevel.SetLevel(zapcore.InfoLevel)
 
-	core := zapcore.NewTee(
-		zapcore.NewCore(fileEncoder, writer, logLevel),
-		zapcore.NewCore(consoleEncoder, zapcore.AddSync(os.Stdout), logLevel),
-	)
-	logger = zap.New(core, zap.AddStacktrace(zapcore.FatalLevel))
+	ResetZapLogger(os.Stdout)
 }
 
 func SetLogLevel(level string) {
@@ -59,6 +58,18 @@ func SetLogLevel(level string) {
 	default:
 		logLevel.SetLevel(zapcore.InfoLevel)
 	}
+}
+
+func ResetZapLogger(buffer *os.File) {
+	if logger != nil {
+		_ = logger.Sync()
+	}
+
+	core := zapcore.NewTee(
+		zapcore.NewCore(fileEncoder, writer, logLevel),
+		zapcore.NewCore(consoleEncoder, zapcore.AddSync(buffer), logLevel),
+	)
+	logger = zap.New(core, zap.AddStacktrace(zapcore.FatalLevel))
 }
 
 func Debug(message string, fields ...zap.Field) {
