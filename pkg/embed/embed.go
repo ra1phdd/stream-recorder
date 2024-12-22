@@ -11,9 +11,13 @@ import (
 //go:embed db/stream-recorder.db
 var embeddedDB []byte
 
+//go:embed config/config.json
+var embeddedConfig []byte
+
 var nameFile = make(map[string]string)
 
 func Init() error {
+	Configs()
 	DB()
 
 	err := CreateFile(getFileFfmpeg(), "ffmpeg", fsFfmpeg)
@@ -63,6 +67,18 @@ func GetTempFileName(name string) string {
 		return nameFile[getFileFfmpeg()]
 	default:
 		return ""
+	}
+}
+
+func Configs() {
+	FileConfig := "config.json"
+
+	if _, err := os.Stat(FileConfig); os.IsNotExist(err) {
+		err = os.WriteFile(FileConfig, embeddedConfig, 0644)
+		if err != nil {
+			fmt.Printf("Ошибка записи файла: %v\n", err)
+			return
+		}
 	}
 }
 
