@@ -2,7 +2,10 @@ package m3u8
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/md5"
+	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -24,23 +27,28 @@ import (
 )
 
 type M3u8 struct {
-	mu          sync.Mutex
-	HTTPClient  *http.Client
-	sem         chan struct{}
-	currentDate string
-	f           *ffmpeg.Ffmpeg
-	c           *config.Config
-	st          *streamlink.TwitchAPI
+	muDs, muFs, muFtxt sync.Mutex
+	HTTPClient         *http.Client
+	currentDate        string
+	f                  *ffmpeg.Ffmpeg
+	c                  *config.Config
+	st                 *streamlink.TwitchAPI
 
 	sm        *models.StreamMetadata
 	isNeedCut bool
 	isCancel  bool
 
 	rottenDownloadedSegments []string
-	downloadedSegments       []string
+	combinedSegments         []string
+	txtFileSegments          []string
+
+	currentMemoryUsage int
+	buffer             bytes.Buffer
+
+	nameFileCombinedSegment, oldNameFileCombinedSegment string
 }
 
-func New(platform, username string, splitSegments bool, timeSegment int, rp *runner.Process, c *config.Config, sem chan struct{}) *M3u8 {
+func New(platform, username string, splitSegments bool, timeSegment int, rp *runner.Process, c *config.Config) *M3u8 {
 	return &M3u8{
 		HTTPClient: &http.Client{
 			Transport: &http.Transport{
@@ -49,7 +57,6 @@ func New(platform, username string, splitSegments bool, timeSegment int, rp *run
 			},
 			Timeout: 60 * time.Second,
 		},
-		sem:         sem,
 		currentDate: time.Now().Format("2006-01-02"),
 		f:           ffmpeg.New(rp, c),
 		c:           c,
@@ -65,7 +72,7 @@ func New(platform, username string, splitSegments bool, timeSegment int, rp *run
 		},
 		isNeedCut:                false,
 		rottenDownloadedSegments: make([]string, 0),
-		downloadedSegments:       make([]string, 0),
+		combinedSegments:         make([]string, 0),
 		isCancel:                 false,
 	}
 }
@@ -112,46 +119,6 @@ func (m *M3u8) FetchPlaylist(url string, parseM3u8 func(string, *models.StreamMe
 	return segments, isSkipSegments, nil
 }
 
-func (m *M3u8) DownloadSegment(url string) error {
-	logger.Debugf("Starting download segment", m.sm.Username, m.sm.Platform, zap.String("url", url))
-
-	resp, err := m.HTTPClient.Get(url)
-	if err != nil {
-		logger.Errorf("Failed to download segment", m.sm.Username, m.sm.Platform, zap.String("url", url), zap.Error(err))
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		logger.Errorf("Received non-OK status code while downloading segment", m.sm.Username, m.sm.Platform, zap.String("url", url), zap.Int("status_code", resp.StatusCode))
-		return errors.New("failed to download segment")
-	}
-
-	fileName := m.GetShortFileName(url)
-	filePath := filepath.Join(
-		m.c.TempPATH,
-		fmt.Sprintf("%s_%s_%s", m.sm.Platform, m.sm.Username, m.currentDate),
-		fileName,
-	)
-	logger.Debugf("Creating file for segment", m.sm.Username, m.sm.Platform, zap.String("filePath", filePath))
-
-	file, err := os.Create(filePath)
-	if err != nil {
-		logger.Errorf("Failed to create file for segment", m.sm.Username, m.sm.Platform, zap.String("filePath", filePath), zap.Error(err))
-		return err
-	}
-	defer file.Close()
-
-	_, err = io.Copy(file, resp.Body)
-	if err != nil {
-		logger.Errorf("Failed to write segment to file", m.sm.Username, m.sm.Platform, zap.String("filePath", filePath), zap.Error(err))
-		return err
-	}
-
-	logger.Debugf("Successfully downloaded segment", m.sm.Username, m.sm.Platform, zap.String("filePath", filePath))
-	return nil
-}
-
 func (m *M3u8) GetShortFileName(url string) string {
 	hasher := md5.New()
 	hasher.Write([]byte(url))
@@ -172,10 +139,13 @@ func (m *M3u8) Run(playlistURL string) error {
 		return err
 	}
 
-	var fileSegments, oldFileSegments, filePathWithoutExtension string
+	var pathTxt, oldPathTxt, pathWithoutExtension string
 	var isFirst = true
-	var file *os.File
+	var fileTxt, fileSegment *os.File
 	for {
+		isSplit := m.sm.SplitSegments && m.sm.TotalDurationStream-m.sm.StartDurationStream > time.Duration(m.sm.TimeSegment)*time.Second
+
+		// Скачиваем сегменты
 		segments, _, err := m.fetchSegments(playlistURL)
 		if err != nil {
 			if strings.Contains(err.Error(), "404") {
@@ -186,38 +156,65 @@ func (m *M3u8) Run(playlistURL string) error {
 				time.Sleep(m.sm.WaitingTime)
 				continue
 			}
-		} else {
-			m.processSegments(segments)
 		}
 
 		if isFirst {
-			fileSegments, filePathWithoutExtension = m.generateFilePaths()
+			pathTxt, pathWithoutExtension = m.generateFilePaths()
+
+			hash, err := generateRandomHash()
+			if err != nil {
+				return err
+			}
+			m.nameFileCombinedSegment = fmt.Sprintf("%s.ts", hash)
+
 			isFirst = false
 		}
 
-		if file == nil || fileSegments != oldFileSegments {
-			file, err = os.OpenFile(fileSegments, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0644)
+		// Создаем файл сегмента, в который будем сбрасывать данные до заполнения буфера
+		if fileSegment == nil || m.nameFileCombinedSegment != m.oldNameFileCombinedSegment {
+			outputFilePath := filepath.Join(
+				m.c.TempPATH,
+				fmt.Sprintf("%s_%s_%s", m.sm.Platform, m.sm.Username, m.currentDate),
+				m.nameFileCombinedSegment,
+			)
+
+			fileSegment, err = os.Create(outputFilePath)
+			if err != nil {
+				logger.Fatalf("Failed to create output file", m.sm.Username, m.sm.Platform, zap.String("filePath", outputFilePath), zap.Error(err))
+			}
+
+			m.oldNameFileCombinedSegment = m.nameFileCombinedSegment
+		}
+
+		// Сбрасываем данные в файл
+		m.processSegments(segments, fileSegment, isSplit || m.isNeedCut || m.isCancel)
+
+		if fileTxt == nil || pathTxt != oldPathTxt {
+			fileTxt, err = os.OpenFile(pathTxt, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0644)
 			if err != nil {
 				logger.Error("Error opening file", zap.Error(err))
 				return err
 			}
-			oldFileSegments = fileSegments
+			oldPathTxt = pathTxt
 		}
 
-		m.mu.Lock()
-		for _, segment := range m.downloadedSegments {
-			if _, err := file.WriteString(fmt.Sprintf("file '%s'\n", segment)); err != nil {
-				logger.Errorf("Error writing to segment file", m.sm.Username, m.sm.Platform, zap.String("fileSegments", fileSegments), zap.String("segment", segment), zap.Error(err))
-				return err
+		m.muFtxt.Lock()
+		for _, segment := range m.combinedSegments {
+			if !m.contains(m.txtFileSegments, segment) {
+				if _, err := fileTxt.WriteString(fmt.Sprintf("file '%s'\n", segment)); err != nil {
+					logger.Errorf("Error writing to segment file", m.sm.Username, m.sm.Platform, zap.String("pathTxt", pathTxt), zap.String("segment", segment), zap.Error(err))
+					return err
+				}
+				m.txtFileSegments = append(m.txtFileSegments, segment)
 			}
 		}
-		m.mu.Unlock()
+		m.muFtxt.Unlock()
 
-		if (m.sm.SplitSegments && m.sm.TotalDurationStream-m.sm.StartDurationStream > time.Duration(m.sm.TimeSegment)*time.Second) || m.isNeedCut || m.isCancel {
-			file.Close()
+		if isSplit || m.isNeedCut || m.isCancel {
+			fileTxt.Close()
 
-			if err := m.f.Run(fileSegments, filePathWithoutExtension); err != nil {
-				logger.Errorf("Error running external process", m.sm.Username, m.sm.Platform, zap.String("fileSegments", fileSegments), zap.String("filepath", filePathWithoutExtension), zap.Error(err))
+			if err := m.f.Run(pathTxt, pathWithoutExtension); err != nil {
+				logger.Errorf("Error running external process", m.sm.Username, m.sm.Platform, zap.String("pathTxt", pathTxt), zap.String("filepath", pathWithoutExtension), zap.Error(err))
 			}
 
 			m.sm.StartDurationStream = 0
@@ -229,11 +226,9 @@ func (m *M3u8) Run(playlistURL string) error {
 			}
 		}
 
-		m.rottenDownloadedSegments = append(m.rottenDownloadedSegments, m.downloadedSegments...)
 		if len(m.rottenDownloadedSegments) > 50 {
 			m.rottenDownloadedSegments = m.rottenDownloadedSegments[len(m.rottenDownloadedSegments)-50:]
 		}
-		m.downloadedSegments = m.downloadedSegments[:0]
 		time.Sleep(m.sm.WaitingTime)
 	}
 
@@ -271,39 +266,86 @@ func (m *M3u8) fetchSegments(playlistURL string) ([]string, bool, error) {
 	}
 }
 
-func (m *M3u8) processSegments(segments []string) {
+func (m *M3u8) processSegments(segments []string, fileSegment *os.File, isNeedFlush bool) {
+	dataMap := make(map[int][]byte)
+	var mu sync.Mutex
 	var wg sync.WaitGroup
 
-	for _, segment := range segments {
-		url := m.GetShortFileName(segment)
-		if !m.contains(m.rottenDownloadedSegments, url) {
-			wg.Add(1)
-			m.sem <- struct{}{}
+	for index, segment := range segments {
+		wg.Add(1)
+		go func(index int, segment string) {
+			defer wg.Done()
 
-			m.mu.Lock()
-			m.downloadedSegments = append(m.downloadedSegments, url)
-			m.mu.Unlock()
+			url := m.GetShortFileName(segment)
+			if !m.contains(m.rottenDownloadedSegments, url) {
+				m.rottenDownloadedSegments = append(m.rottenDownloadedSegments, url)
 
-			go func(segment, url string) {
-				defer wg.Done()
-				defer func() { <-m.sem }()
-
-				if err := m.DownloadSegment(segment); err != nil {
+				data, err := m.DownloadSegment(segment)
+				if err != nil {
 					logger.Errorf("Error downloading segment", m.sm.Username, m.sm.Platform, zap.String("segmentURL", segment), zap.Error(err))
-
-					m.mu.Lock()
-					for i, v := range m.downloadedSegments {
-						if v == url {
-							m.downloadedSegments = append(m.downloadedSegments[:i], m.downloadedSegments[i+1:]...)
-							break
-						}
-					}
-					m.mu.Unlock()
+					return
 				}
-			}(segment, url)
+
+				mu.Lock()
+				dataMap[index] = data
+				mu.Unlock()
+			}
+		}(index, segment)
+	}
+
+	wg.Wait()
+
+	for i := 0; i < len(segments); i++ {
+		m.buffer.Write(dataMap[i])
+		m.currentMemoryUsage += len(dataMap[i])
+
+		if m.currentMemoryUsage >= m.c.BufferSize*1024*1024 || isNeedFlush {
+			m.FlushToDisk(fileSegment)
 		}
 	}
-	wg.Wait()
+}
+
+func (m *M3u8) FlushToDisk(fileSegment *os.File) {
+	_, err := fileSegment.Write(m.buffer.Bytes())
+	if err != nil {
+		logger.Errorf("Failed to flush buffer to file", m.sm.Username, m.sm.Platform, zap.String("filePath", fileSegment.Name()), zap.Error(err))
+	}
+	m.buffer.Reset()
+	m.currentMemoryUsage = 0
+
+	m.combinedSegments = append(m.combinedSegments, m.nameFileCombinedSegment)
+	fileSegment.Close()
+
+	hash, err := generateRandomHash()
+	if err != nil {
+		logger.Error("Error generating hash", zap.Error(err))
+	}
+	m.nameFileCombinedSegment = fmt.Sprintf("%s.ts", hash)
+}
+
+func (m *M3u8) DownloadSegment(url string) ([]byte, error) {
+	logger.Debugf("Starting download segment", m.sm.Username, m.sm.Platform, zap.String("url", url))
+
+	resp, err := m.HTTPClient.Get(url)
+	if err != nil {
+		logger.Errorf("Failed to download segment", m.sm.Username, m.sm.Platform, zap.String("url", url), zap.Error(err))
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		logger.Errorf("Received non-OK status code while downloading segment", m.sm.Username, m.sm.Platform, zap.String("url", url), zap.Int("status_code", resp.StatusCode))
+		return nil, errors.New("failed to download segment")
+	}
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		logger.Errorf("Failed to read segment data", m.sm.Username, m.sm.Platform, zap.String("url", url), zap.Error(err))
+		return nil, err
+	}
+
+	logger.Debugf("Successfully downloaded segment", m.sm.Username, m.sm.Platform, zap.String("url", url))
+	return data, nil
 }
 
 func (m *M3u8) contains(slice []string, item string) bool {
@@ -322,6 +364,21 @@ func (m *M3u8) formatDuration(d time.Duration) string {
 	d -= mins * time.Minute
 	secs := d / time.Second
 	return fmt.Sprintf("%dh%dm%ds", hours, mins, secs)
+}
+
+func generateRandomHash() (string, error) {
+	// Создаем буфер для случайных байтов
+	randomBytes := make([]byte, 32) // 32 байта -> 256 бит
+	_, err := io.ReadFull(rand.Reader, randomBytes)
+	if err != nil {
+		return "", err
+	}
+
+	// Вычисляем хэш от случайных байтов
+	hash := sha256.Sum256(randomBytes)
+
+	// Преобразуем хэш в строку в формате HEX
+	return hex.EncodeToString(hash[:]), nil
 }
 
 func (m *M3u8) ChangeIsNeedCut(value bool) {

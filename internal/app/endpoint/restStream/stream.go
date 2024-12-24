@@ -22,17 +22,15 @@ type Endpoint struct {
 	limiter map[string]*rate.Limiter
 	rp      *runner.Process
 	cfg     *config.Config
-	sem     chan struct{}
 }
 
-func New(am map[string]*m3u8.M3u8, as map[string]bool, rp *runner.Process, cfg *config.Config, sem chan struct{}) *Endpoint {
+func New(am map[string]*m3u8.M3u8, as map[string]bool, rp *runner.Process, cfg *config.Config) *Endpoint {
 	return &Endpoint{
 		am:      am,
 		as:      as,
 		limiter: make(map[string]*rate.Limiter),
 		rp:      rp,
 		cfg:     cfg,
-		sem:     sem,
 	}
 }
 
@@ -103,7 +101,7 @@ func (e *Endpoint) DownloadM3u8Handler(c *gin.Context) {
 
 	streamerID := fmt.Sprintf("%s-%s", platform, username)
 
-	e.am[streamerID] = m3u8.New(platform, username, splitSegments, timeSegment, e.rp, e.cfg, e.sem)
+	e.am[streamerID] = m3u8.New(platform, username, splitSegments, timeSegment, e.rp, e.cfg)
 	err := e.am[streamerID].Run(url)
 	if err != nil {
 		logger.Error("Error running m3u8", zap.Error(err))

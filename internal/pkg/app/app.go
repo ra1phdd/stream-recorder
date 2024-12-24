@@ -24,7 +24,6 @@ type App struct {
 
 	ActiveM3u8      map[string]*m3u8.M3u8
 	ActiveStreamers map[string]bool
-	Sem             chan struct{}
 }
 
 func New(workMode string) (*App, error) {
@@ -55,7 +54,6 @@ func setupApplication(workMode string) *App {
 		return nil
 	}
 
-	a.Sem = make(chan struct{}, a.Cfg.ParallelDownloading)
 	logger.SetLogLevel(a.Cfg.LoggerLevel)
 
 	//err = tmp.Clear("tmp")
@@ -68,7 +66,7 @@ func setupApplication(workMode string) *App {
 	a.RunnerProcess = runner.NewProcess()
 
 	a.Streamlink = streamlink.New()
-	a.CheckStreams = streams.New(a.StreamersRepo, a.Streamlink, a.RunnerProcess, a.Cfg, a.ActiveStreamers, a.ActiveM3u8, a.Sem)
+	a.CheckStreams = streams.New(a.StreamersRepo, a.Streamlink, a.RunnerProcess, a.Cfg, a.ActiveStreamers, a.ActiveM3u8)
 
 	a.CheckStreams.Recovery()
 

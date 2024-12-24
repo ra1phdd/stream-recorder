@@ -47,7 +47,7 @@ func setupServer(a *app.App) error {
 
 	// регистрируем эндпоинты
 	serviceStreamer := restStreamer.New(a.StreamersRepo, a.ActiveM3u8)
-	serviceStream := restStream.New(a.ActiveM3u8, a.ActiveStreamers, a.RunnerProcess, a.Cfg, a.Sem)
+	serviceStream := restStream.New(a.ActiveM3u8, a.ActiveStreamers, a.RunnerProcess, a.Cfg)
 
 	// регистрируем маршруты
 	a.Router.GET("/streamer/list", serviceStreamer.GetListStreamersHandler)

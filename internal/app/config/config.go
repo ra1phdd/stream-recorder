@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"runtime"
 	"stream-recorder/pkg/logger"
 )
 
@@ -16,7 +15,7 @@ type Config struct {
 	TempPATH               string `json:"temp_path"`
 	AutoCleanMediaPATH     bool   `json:"auto_clean_media_path"`
 	TimeAutoCleanMediaPATH int    `json:"time_auto_clean_media_path"`
-	ParallelDownloading    int    `json:"parallel_downloading"`
+	BufferSize             int    `json:"buffer_size"`
 	VideoCodec             string `json:"video_codec"`
 	AudioCodec             string `json:"audio_codec"`
 	FileFormat             string `json:"file_format"`
@@ -59,8 +58,8 @@ func (c *Config) setDefaults(workMode string) {
 	if c.AutoCleanMediaPATH && c.TimeAutoCleanMediaPATH == 0 {
 		c.TimeAutoCleanMediaPATH = 7
 	}
-	if c.ParallelDownloading == 0 {
-		c.ParallelDownloading = runtime.NumCPU()
+	if c.BufferSize == 0 {
+		c.BufferSize = 32
 	}
 	if c.VideoCodec == "" {
 		c.VideoCodec = "copy"
@@ -121,9 +120,9 @@ func (c *Config) NormalizeEnv(workMode string) {
 		c.TimeAutoCleanMediaPATH = 1
 	}
 
-	if c.ParallelDownloading < 1 {
-		logger.Warn("The number of parallel connections cannot be less than 1. The default value is equal to the number of logical cores.")
-		c.ParallelDownloading = runtime.NumCPU()
+	if c.BufferSize < 32 {
+		logger.Warn("The buffer size cannot be less than 32 megabytes. 32 megabytes is selected by default.")
+		c.BufferSize = 32
 	}
 
 	if workMode == "server" {

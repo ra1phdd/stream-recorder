@@ -28,7 +28,7 @@ type Streams struct {
 	sem             chan struct{}
 }
 
-func New(sr *repository.StreamersRepository, sl *streamlink.Streamlink, rp *runner.Process, cfg *config.Config, activeStreamers map[string]bool, activeM3u8 map[string]*m3u8.M3u8, sem chan struct{}) *Streams {
+func New(sr *repository.StreamersRepository, sl *streamlink.Streamlink, rp *runner.Process, cfg *config.Config, activeStreamers map[string]bool, activeM3u8 map[string]*m3u8.M3u8) *Streams {
 	return &Streams{
 		sr:              sr,
 		sl:              sl,
@@ -36,7 +36,6 @@ func New(sr *repository.StreamersRepository, sl *streamlink.Streamlink, rp *runn
 		cfg:             cfg,
 		activeStreamers: activeStreamers,
 		activeM3u8:      activeM3u8,
-		sem:             sem,
 	}
 }
 
@@ -88,7 +87,7 @@ func (s *Streams) checkingForStream(stream models.Streamers) {
 	}
 
 	logger.Infof("The streamer has started a live broadcast, I'm starting the recording...", stream.Username, stream.Platform)
-	s.activeM3u8[fmt.Sprintf("%s-%s", stream.Platform, stream.Username)] = m3u8.New(stream.Platform, stream.Username, stream.SplitSegments, stream.TimeSegment, s.rp, s.cfg, s.sem)
+	s.activeM3u8[fmt.Sprintf("%s-%s", stream.Platform, stream.Username)] = m3u8.New(stream.Platform, stream.Username, stream.SplitSegments, stream.TimeSegment, s.rp, s.cfg)
 	err = s.activeM3u8[fmt.Sprintf("%s-%s", stream.Platform, stream.Username)].Run(mediaHls)
 	if err != nil {
 		logger.Error("Error running m3u8", zap.Error(err))
