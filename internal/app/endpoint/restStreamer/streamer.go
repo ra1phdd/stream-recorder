@@ -101,7 +101,9 @@ func (e *Endpoint) DeleteStreamerHandler(c *gin.Context) {
 		return
 	}
 
-	e.am[fmt.Sprintf("%s-%s", s.Platform, s.Username)].ChangeIsCancel(true)
+	if e.am[fmt.Sprintf("%s-%s", s.Platform, s.Username)] != nil {
+		e.am[fmt.Sprintf("%s-%s", s.Platform, s.Username)].ChangeIsCancel(true)
+	}
 	c.JSON(http.StatusOK, "success")
 }
 
