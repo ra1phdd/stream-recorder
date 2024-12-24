@@ -3,13 +3,12 @@ package streamlink
 import (
 	"bufio"
 	"bytes"
-	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"go.uber.org/zap"
 	"io"
-	"math/big"
+	"math/rand"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -55,14 +54,13 @@ func RandomToken(length int, choices string) (string, error) {
 	}
 
 	var result strings.Builder
-	choicesLen := big.NewInt(int64(len(choices)))
+	choicesLen := len(choices)
+
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	for i := 0; i < length; i++ {
-		randomIndex, err := rand.Int(rand.Reader, choicesLen)
-		if err != nil {
-			return "", err
-		}
-		result.WriteByte(choices[randomIndex.Int64()])
+		randomIndex := r.Intn(choicesLen)
+		result.WriteByte(choices[randomIndex])
 	}
 
 	return result.String(), nil
@@ -222,7 +220,7 @@ func (t *TwitchAPI) GetMasterPlaylist(channel string) (string, error) {
 		return "", err
 	}
 
-	return fmt.Sprintf("%s/api/channel/hls/%s.m3u8?player=twitchweb&platform=web&supported_codecs=h265,h264&p=605468&type=any&allow_source=true&allow_audio_only=true&allow_spectre=false&sig=%s&token=%s", UsherURL, channel, accessToken["signature"].(string), url.QueryEscape(accessToken["value"].(string))), nil
+	return fmt.Sprintf("%s/api/channel/hls/%s.m3u8?player=twitchweb&platform=web&supported_codecs=h265,h264&p=715347&type=any&allow_source=true&allow_audio_only=true&allow_spectre=false&sig=%s&token=%s", UsherURL, channel, accessToken["signature"].(string), url.QueryEscape(accessToken["value"].(string))), nil
 }
 
 func (t *TwitchAPI) FindMediaPlaylist(masterPlaylist, quality string) (string, error) {

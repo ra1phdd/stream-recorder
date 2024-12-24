@@ -33,6 +33,7 @@ func (f *Ffmpeg) Run(filePath, output string) error {
 	logger.Debug("Starting ffmpeg", zap.String("filepath", filePath), zap.String("output", output))
 
 	args := []string{
+		"-y",
 		"-re",
 		"-protocol_whitelist", "file,crypto,data,http,https,tls,tcp",
 		"-loglevel", "warning",

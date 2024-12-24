@@ -165,13 +165,16 @@ func (m *M3u8) Run(playlistURL string) error {
 	}
 
 	streamDir := fmt.Sprintf("%s_%s_%s", m.sm.Platform, m.sm.Username, m.currentDate)
-	if err := m.createDirectoryIfNotExist(filepath.Join(m.c.TempPATH, streamDir)); err != nil {
+	if err := CreateDirectoryIfNotExist(filepath.Join(m.c.TempPATH, streamDir)); err != nil {
 		return err
 	}
-	if err := m.createDirectoryIfNotExist(filepath.Join(m.c.MediaPATH, streamDir)); err != nil {
+	if err := CreateDirectoryIfNotExist(filepath.Join(m.c.MediaPATH, streamDir)); err != nil {
 		return err
 	}
 
+	var fileSegments, oldFileSegments, filePathWithoutExtension string
+	var isFirst = true
+	var file *os.File
 	for {
 		segments, _, err := m.fetchSegments(playlistURL)
 		if err != nil {
@@ -187,49 +190,57 @@ func (m *M3u8) Run(playlistURL string) error {
 			m.processSegments(segments)
 		}
 
+		if isFirst {
+			fileSegments, filePathWithoutExtension = m.generateFilePaths()
+			isFirst = false
+		}
+
+		if file == nil || fileSegments != oldFileSegments {
+			file, err = os.OpenFile(fileSegments, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0644)
+			if err != nil {
+				logger.Error("Error opening file", zap.Error(err))
+				return err
+			}
+			oldFileSegments = fileSegments
+		}
+
+		m.mu.Lock()
+		for _, segment := range m.downloadedSegments {
+			if _, err := file.WriteString(fmt.Sprintf("file '%s'\n", segment)); err != nil {
+				logger.Errorf("Error writing to segment file", m.sm.Username, m.sm.Platform, zap.String("fileSegments", fileSegments), zap.String("segment", segment), zap.Error(err))
+				return err
+			}
+		}
+		m.mu.Unlock()
+
 		if (m.sm.SplitSegments && m.sm.TotalDurationStream-m.sm.StartDurationStream > time.Duration(m.sm.TimeSegment)*time.Second) || m.isNeedCut || m.isCancel {
-			fileSegments := filepath.Join(
-				m.c.TempPATH,
-				fmt.Sprintf("%s_%s_%s", m.sm.Platform, m.sm.Username, m.currentDate),
-				fmt.Sprintf("%s_%s_%s.txt", m.sm.Platform, m.sm.Username, m.formatDuration(m.sm.StartDurationStream)),
-			)
-			filePathWithoutExtension := filepath.Join(
-				m.c.MediaPATH,
-				fmt.Sprintf("%s_%s_%s", m.sm.Platform, m.sm.Username, m.currentDate),
-				fmt.Sprintf("%s_%s_%s", m.sm.Platform, m.sm.Username, m.formatDuration(m.sm.StartDurationStream)),
-			)
+			file.Close()
 
-			if len(m.downloadedSegments) != 0 {
-				logger.Infof("Creating segment file", m.sm.Username, m.sm.Platform, zap.String("fileSegments", fileSegments), zap.String("filepath", filePathWithoutExtension))
-
-				if err := m.createSegmentFile(fileSegments); err != nil {
-					return err
-				}
-
-				if err := m.f.Run(fileSegments, filePathWithoutExtension); err != nil {
-					logger.Errorf("Error running external process", m.sm.Username, m.sm.Platform, zap.String("fileSegments", fileSegments), zap.String("filepath", filePathWithoutExtension), zap.Error(err))
-				}
-
-				logger.Infof("Completed segment processing", m.sm.Username, m.sm.Platform, zap.String("filepath", filePathWithoutExtension))
+			if err := m.f.Run(fileSegments, filePathWithoutExtension); err != nil {
+				logger.Errorf("Error running external process", m.sm.Username, m.sm.Platform, zap.String("fileSegments", fileSegments), zap.String("filepath", filePathWithoutExtension), zap.Error(err))
 			}
 
 			m.sm.StartDurationStream = 0
-			m.rottenDownloadedSegments = m.downloadedSegments
-			m.downloadedSegments = m.downloadedSegments[:0]
 			m.isNeedCut = false
+			isFirst = true
 
 			if m.isCancel {
 				break
 			}
 		}
 
+		m.rottenDownloadedSegments = append(m.rottenDownloadedSegments, m.downloadedSegments...)
+		if len(m.rottenDownloadedSegments) > 50 {
+			m.rottenDownloadedSegments = m.rottenDownloadedSegments[len(m.rottenDownloadedSegments)-50:]
+		}
+		m.downloadedSegments = m.downloadedSegments[:0]
 		time.Sleep(m.sm.WaitingTime)
 	}
 
 	return nil
 }
 
-func (m *M3u8) createDirectoryIfNotExist(path string) error {
+func CreateDirectoryIfNotExist(path string) error {
 	_, err := os.Stat(path)
 	if os.IsNotExist(err) {
 		logger.Debug("Directory does not exist. Creating...", zap.String("outputDir", path))
@@ -239,6 +250,16 @@ func (m *M3u8) createDirectoryIfNotExist(path string) error {
 		logger.Debug("Directory created successfully", zap.String("outputDir", path))
 	}
 	return nil
+}
+
+func (m *M3u8) generateFilePaths() (fileSegments, filePathWithoutExtension string) {
+	dirName := fmt.Sprintf("%s_%s_%s", m.sm.Platform, m.sm.Username, m.currentDate)
+	fileName := fmt.Sprintf("%s_%s_%s", m.sm.Platform, m.sm.Username, m.formatDuration(m.sm.StartDurationStream))
+
+	fileSegments = filepath.Join(m.c.TempPATH, dirName, fileName+".txt")
+	filePathWithoutExtension = filepath.Join(m.c.MediaPATH, dirName, fileName)
+
+	return fileSegments, filePathWithoutExtension
 }
 
 func (m *M3u8) fetchSegments(playlistURL string) ([]string, bool, error) {
@@ -255,7 +276,7 @@ func (m *M3u8) processSegments(segments []string) {
 
 	for _, segment := range segments {
 		url := m.GetShortFileName(segment)
-		if !m.contains(m.downloadedSegments, url) && !m.contains(m.rottenDownloadedSegments, url) {
+		if !m.contains(m.rottenDownloadedSegments, url) {
 			wg.Add(1)
 			m.sem <- struct{}{}
 
@@ -283,26 +304,6 @@ func (m *M3u8) processSegments(segments []string) {
 		}
 	}
 	wg.Wait()
-}
-
-func (m *M3u8) createSegmentFile(fileSegments string) error {
-	file, err := os.Create(fileSegments)
-	if err != nil {
-		logger.Errorf("Error creating segment file", m.sm.Username, m.sm.Platform, zap.String("fileSegments", fileSegments), zap.Error(err))
-		return err
-	}
-	defer file.Close()
-
-	writer := bufio.NewWriter(file)
-	defer writer.Flush()
-
-	for _, segment := range m.downloadedSegments {
-		if _, err := writer.WriteString(fmt.Sprintf("file '%s'\n", segment)); err != nil {
-			logger.Errorf("Error writing to segment file", m.sm.Username, m.sm.Platform, zap.String("fileSegments", fileSegments), zap.Error(err))
-			return err
-		}
-	}
-	return nil
 }
 
 func (m *M3u8) contains(slice []string, item string) bool {

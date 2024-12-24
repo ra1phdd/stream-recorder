@@ -9,7 +9,6 @@ import (
 	"stream-recorder/internal/app/services/runner"
 	"stream-recorder/internal/app/services/streamlink"
 	"stream-recorder/internal/app/services/streams"
-	"stream-recorder/internal/app/services/tmp"
 	"stream-recorder/pkg/db"
 	embedded "stream-recorder/pkg/embed"
 	"stream-recorder/pkg/logger"
@@ -59,17 +58,19 @@ func setupApplication(workMode string) *App {
 	a.Sem = make(chan struct{}, a.Cfg.ParallelDownloading)
 	logger.SetLogLevel(a.Cfg.LoggerLevel)
 
-	err = tmp.Clear("tmp")
-	if err != nil {
-		logger.Error("Error clearing tmp", zap.Error(err))
-		return nil
-	}
+	//err = tmp.Clear("tmp")
+	//if err != nil {
+	//	logger.Error("Error clearing tmp", zap.Error(err))
+	//	return nil
+	//}
 
 	a.StreamersRepo = repository.NewStreamers()
 	a.RunnerProcess = runner.NewProcess()
 
 	a.Streamlink = streamlink.New()
 	a.CheckStreams = streams.New(a.StreamersRepo, a.Streamlink, a.RunnerProcess, a.Cfg, a.ActiveStreamers, a.ActiveM3u8, a.Sem)
+
+	a.CheckStreams.Recovery()
 
 	go a.CheckStreams.CheckingForStreams()
 	return a
