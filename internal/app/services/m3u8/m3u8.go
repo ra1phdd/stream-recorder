@@ -11,20 +11,26 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"stream-recorder/internal/app/config"
 	"stream-recorder/internal/app/services/ffmpeg"
 	"stream-recorder/internal/app/services/models"
 	"stream-recorder/internal/app/services/runner"
 	"stream-recorder/internal/app/services/streamlink"
 	"stream-recorder/pkg/logger"
+	"strings"
+	"sync"
 	"time"
 )
 
 type M3u8 struct {
-	HTTPClient *http.Client
-	f          *ffmpeg.Ffmpeg
-	c          *config.Config
-	st         *streamlink.TwitchAPI
+	mu          sync.Mutex
+	HTTPClient  *http.Client
+	sem         chan struct{}
+	currentDate string
+	f           *ffmpeg.Ffmpeg
+	c           *config.Config
+	st          *streamlink.TwitchAPI
 
 	sm        *models.StreamMetadata
 	isNeedCut bool
@@ -34,11 +40,19 @@ type M3u8 struct {
 	downloadedSegments       []string
 }
 
-func New(platform, username string, splitSegments bool, timeSegment int, rp *runner.Process, c *config.Config) *M3u8 {
+func New(platform, username string, splitSegments bool, timeSegment int, rp *runner.Process, c *config.Config, sem chan struct{}) *M3u8 {
 	return &M3u8{
-		HTTPClient: &http.Client{Timeout: 60 * time.Second},
-		f:          ffmpeg.New(rp, c),
-		c:          c,
+		HTTPClient: &http.Client{
+			Transport: &http.Transport{
+				MaxIdleConns:        100,
+				MaxIdleConnsPerHost: 10,
+			},
+			Timeout: 60 * time.Second,
+		},
+		sem:         sem,
+		currentDate: time.Now().Format("2006-01-02"),
+		f:           ffmpeg.New(rp, c),
+		c:           c,
 		sm: &models.StreamMetadata{
 			SkipTargetDuration:  false,
 			TotalDurationStream: 0,
@@ -65,7 +79,7 @@ func (m *M3u8) FetchPlaylist(url string, parseM3u8 func(string, *models.StreamMe
 
 	if resp.StatusCode != http.StatusOK {
 		logger.Errorf("Failed to fetch master playlist", m.sm.Username, m.sm.Platform, zap.Int("status_code", resp.StatusCode))
-		return nil, false, errors.New("failed to fetch master playlist")
+		return nil, false, errors.New(strconv.Itoa(resp.StatusCode))
 	}
 
 	var segments []string
@@ -116,7 +130,7 @@ func (m *M3u8) DownloadSegment(url string) error {
 	fileName := m.GetShortFileName(url)
 	filePath := filepath.Join(
 		m.c.TempPATH,
-		fmt.Sprintf("%s_%s_%s", m.sm.Platform, m.sm.Username, time.Now().Format("2006-01-02")),
+		fmt.Sprintf("%s_%s_%s", m.sm.Platform, m.sm.Username, m.currentDate),
 		fileName,
 	)
 	logger.Debugf("Creating file for segment", m.sm.Username, m.sm.Platform, zap.String("filePath", filePath))
@@ -150,7 +164,7 @@ func (m *M3u8) Run(playlistURL string) error {
 		return errors.New("playlistURL is empty")
 	}
 
-	streamDir := fmt.Sprintf("%s_%s_%s", m.sm.Platform, m.sm.Username, time.Now().Format("2006-01-02"))
+	streamDir := fmt.Sprintf("%s_%s_%s", m.sm.Platform, m.sm.Username, m.currentDate)
 	if err := m.createDirectoryIfNotExist(filepath.Join(m.c.TempPATH, streamDir)); err != nil {
 		return err
 	}
@@ -159,30 +173,30 @@ func (m *M3u8) Run(playlistURL string) error {
 	}
 
 	for {
-		var segments []string
-		var err error
-		switch m.sm.Platform {
-		case "twitch":
-			segments, _, err = m.FetchPlaylist(playlistURL, m.st.ParseM3u8)
-		}
+		segments, _, err := m.fetchSegments(playlistURL)
 		if err != nil {
-			logger.Errorf("Error fetching playlist", m.sm.Username, m.sm.Platform, zap.String("playlistURL", playlistURL), zap.Error(err))
-			time.Sleep(m.sm.WaitingTime)
-			continue
+			if strings.Contains(err.Error(), "404") {
+				logger.Infof("The streamer has finished the live broadcast, and I'm starting the final processing...", m.sm.Username, m.sm.Platform)
+				m.isCancel = true
+			} else {
+				logger.Errorf("Error fetching playlist", m.sm.Username, m.sm.Platform, zap.String("playlistURL", playlistURL), zap.Error(err))
+				time.Sleep(m.sm.WaitingTime)
+				continue
+			}
+		} else {
+			m.processSegments(segments)
 		}
-
-		m.processSegments(segments)
 
 		if (m.sm.SplitSegments && m.sm.TotalDurationStream-m.sm.StartDurationStream > time.Duration(m.sm.TimeSegment)*time.Second) || m.isNeedCut || m.isCancel {
 			fileSegments := filepath.Join(
 				m.c.TempPATH,
-				fmt.Sprintf("%s_%s_%s", m.sm.Platform, m.sm.Username, time.Now().Format("2006-01-02")),
-				fmt.Sprintf("%s_%s_%s.txt", m.sm.Platform, m.sm.Username, m.sm.StartDurationStream),
+				fmt.Sprintf("%s_%s_%s", m.sm.Platform, m.sm.Username, m.currentDate),
+				fmt.Sprintf("%s_%s_%s.txt", m.sm.Platform, m.sm.Username, m.formatDuration(m.sm.StartDurationStream)),
 			)
 			filePathWithoutExtension := filepath.Join(
 				m.c.MediaPATH,
-				fmt.Sprintf("%s_%s_%s", m.sm.Platform, m.sm.Username, time.Now().Format("2006-01-02")),
-				fmt.Sprintf("%s_%s_%s", m.sm.Platform, m.sm.Username, m.sm.StartDurationStream),
+				fmt.Sprintf("%s_%s_%s", m.sm.Platform, m.sm.Username, m.currentDate),
+				fmt.Sprintf("%s_%s_%s", m.sm.Platform, m.sm.Username, m.formatDuration(m.sm.StartDurationStream)),
 			)
 
 			if len(m.downloadedSegments) != 0 {
@@ -227,17 +241,48 @@ func (m *M3u8) createDirectoryIfNotExist(path string) error {
 	return nil
 }
 
+func (m *M3u8) fetchSegments(playlistURL string) ([]string, bool, error) {
+	switch m.sm.Platform {
+	case "twitch":
+		return m.FetchPlaylist(playlistURL, m.st.ParseM3u8)
+	default:
+		return nil, false, fmt.Errorf("unsupported platform: %s", m.sm.Platform)
+	}
+}
+
 func (m *M3u8) processSegments(segments []string) {
+	var wg sync.WaitGroup
+
 	for _, segment := range segments {
 		url := m.GetShortFileName(segment)
 		if !m.contains(m.downloadedSegments, url) && !m.contains(m.rottenDownloadedSegments, url) {
-			if err := m.DownloadSegment(segment); err != nil {
-				logger.Errorf("Error downloading segment", m.sm.Username, m.sm.Platform, zap.String("segmentURL", segment), zap.Error(err))
-			} else {
-				m.downloadedSegments = append(m.downloadedSegments, url)
-			}
+			wg.Add(1)
+			m.sem <- struct{}{}
+
+			m.mu.Lock()
+			m.downloadedSegments = append(m.downloadedSegments, url)
+			m.mu.Unlock()
+
+			go func(segment, url string) {
+				defer wg.Done()
+				defer func() { <-m.sem }()
+
+				if err := m.DownloadSegment(segment); err != nil {
+					logger.Errorf("Error downloading segment", m.sm.Username, m.sm.Platform, zap.String("segmentURL", segment), zap.Error(err))
+
+					m.mu.Lock()
+					for i, v := range m.downloadedSegments {
+						if v == url {
+							m.downloadedSegments = append(m.downloadedSegments[:i], m.downloadedSegments[i+1:]...)
+							break
+						}
+					}
+					m.mu.Unlock()
+				}
+			}(segment, url)
 		}
 	}
+	wg.Wait()
 }
 
 func (m *M3u8) createSegmentFile(fileSegments string) error {
@@ -248,8 +293,11 @@ func (m *M3u8) createSegmentFile(fileSegments string) error {
 	}
 	defer file.Close()
 
+	writer := bufio.NewWriter(file)
+	defer writer.Flush()
+
 	for _, segment := range m.downloadedSegments {
-		if _, err := file.WriteString(fmt.Sprintf("file '%s'\n", segment)); err != nil {
+		if _, err := writer.WriteString(fmt.Sprintf("file '%s'\n", segment)); err != nil {
 			logger.Errorf("Error writing to segment file", m.sm.Username, m.sm.Platform, zap.String("fileSegments", fileSegments), zap.Error(err))
 			return err
 		}
@@ -264,6 +312,15 @@ func (m *M3u8) contains(slice []string, item string) bool {
 		}
 	}
 	return false
+}
+
+func (m *M3u8) formatDuration(d time.Duration) string {
+	hours := d / time.Hour
+	d -= hours * time.Hour
+	mins := d / time.Minute
+	d -= mins * time.Minute
+	secs := d / time.Second
+	return fmt.Sprintf("%dh%dm%ds", hours, mins, secs)
 }
 
 func (m *M3u8) ChangeIsNeedCut(value bool) {

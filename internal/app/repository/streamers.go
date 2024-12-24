@@ -108,3 +108,52 @@ func (sr *StreamersRepository) Delete(s models.Streamers) error {
 
 	return nil
 }
+
+func (sr *StreamersRepository) UpdateQuality(platform, username, quality string) error {
+	logger.Debug("Updating quality for streamer", zap.String("platform", platform), zap.String("username", username), zap.String("quality", quality))
+
+	_, err := db.Conn.Exec(`UPDATE streamers SET quality = $1 WHERE platform = $2 AND username = $3`, quality, platform, username)
+	if err != nil {
+		logger.Error("Failed to update quality for streamer", zap.String("platform", platform), zap.String("username", username), zap.Error(err))
+		return err
+	}
+	logger.Debug("Quality for streamer updated successfully", zap.String("platform", platform), zap.String("username", username))
+
+	return nil
+}
+
+func (sr *StreamersRepository) UpdateSplitSegments(platform, username string, splitSegments bool, timeSegment int) error {
+	logger.Debug("Updating split_segments and optionally time_segment for streamer",
+		zap.String("platform", platform),
+		zap.String("username", username),
+		zap.Bool("split_segments", splitSegments),
+		zap.Any("time_segment", timeSegment),
+	)
+
+	query := `UPDATE streamers SET split_segments = $1`
+	args := []interface{}{splitSegments, platform, username}
+
+	if timeSegment != 0 {
+		query += `, time_segment = $2`
+		args = append([]interface{}{splitSegments, timeSegment, platform, username}, args[3:]...)
+	}
+
+	query += ` WHERE platform = $3 AND username = $4`
+
+	_, err := db.Conn.Exec(query, args...)
+	if err != nil {
+		logger.Error("Failed to update split_segments and/or time_segment for streamer",
+			zap.String("platform", platform),
+			zap.String("username", username),
+			zap.Error(err),
+		)
+		return err
+	}
+
+	logger.Debug("Successfully updated split_segments and optionally time_segment for streamer",
+		zap.String("platform", platform),
+		zap.String("username", username),
+	)
+
+	return nil
+}

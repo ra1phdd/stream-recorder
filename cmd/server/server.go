@@ -47,13 +47,15 @@ func setupServer(a *app.App) error {
 
 	// регистрируем эндпоинты
 	serviceStreamer := restStreamer.New(a.StreamersRepo, a.ActiveM3u8)
-	serviceStream := restStream.New(a.ActiveM3u8)
+	serviceStream := restStream.New(a.ActiveM3u8, a.ActiveStreamers, a.RunnerProcess, a.Cfg, a.Sem)
 
 	// регистрируем маршруты
 	a.Router.GET("/streamer/list", serviceStreamer.GetListStreamersHandler)
 	a.Router.GET("/streamer/add", serviceStreamer.AddStreamerHandler)
+	a.Router.GET("/streamer/update", serviceStreamer.UpdateStreamerHandler)
 	a.Router.GET("/streamer/delete", serviceStreamer.DeleteStreamerHandler)
 	a.Router.GET("/stream/cut", serviceStream.CutStreamHandler)
+	a.Router.GET("/stream/download_m3u8", serviceStream.DownloadM3u8Handler)
 
 	return runServer(a.Router, a.Cfg.Port)
 }

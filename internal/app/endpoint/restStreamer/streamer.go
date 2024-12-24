@@ -104,3 +104,43 @@ func (e *Endpoint) DeleteStreamerHandler(c *gin.Context) {
 	e.am[fmt.Sprintf("%s-%s", s.Platform, s.Username)].ChangeIsCancel(true)
 	c.JSON(http.StatusOK, "success")
 }
+
+func (e *Endpoint) UpdateStreamerHandler(c *gin.Context) {
+	platform := c.Query("platform")
+	username := c.Query("username")
+	if platform == "" || username == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "platform or username is empty"})
+		return
+	}
+
+	if quality := c.Query("quality"); quality != "" {
+		if err := e.sr.UpdateQuality(platform, username, quality); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+	}
+
+	if splitSegmentsStr := c.Query("split_segments"); splitSegmentsStr != "" {
+		splitSegments, err := strconv.ParseBool(splitSegmentsStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "split_segments contains an invalid value (expected true/false)"})
+			return
+		}
+
+		var timeSegment int
+		if timeSegmentStr := c.Query("time_segment"); timeSegmentStr != "" {
+			timeSegment, err = strconv.Atoi(timeSegmentStr)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "time_segment contains an invalid value"})
+				return
+			}
+		}
+
+		if err := e.sr.UpdateSplitSegments(platform, username, splitSegments, timeSegment); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{"status": "success"})
+}
