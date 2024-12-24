@@ -34,6 +34,7 @@ func (f *Ffmpeg) Run(filePath, output string) error {
 
 	args := []string{
 		"-y",
+		"-err_detect", "ignore_err",
 		"-re",
 		"-protocol_whitelist", "file,crypto,data,http,https,tls,tcp",
 		"-loglevel", "warning",
