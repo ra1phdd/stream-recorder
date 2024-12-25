@@ -43,11 +43,11 @@ func (f *Ffmpeg) Run(filePath, output string) error {
 		"-fps_mode", "cfr",
 		"-c:v", f.c.VideoCodec,
 		"-c:a", f.c.AudioCodec,
-		fmt.Sprintf("%s.%s", output, f.c.FileFormat),
+		fmt.Sprintf("%s_download.%s", output, f.c.FileFormat),
 	}
 
 	f.cmd = exec.Command(embed.GetTempFileName("ffmpeg"), args...)
-	err := f.rp.Run("ffmpeg", f.cmd, filePath, f.handlerStdout, f.waitForExit)
+	err := f.rp.Run("ffmpeg", f.cmd, filePath, output, f.handlerStdout, f.waitForExit)
 	if err != nil {
 		return err
 	}
@@ -62,10 +62,15 @@ func (f *Ffmpeg) handlerStdout(line string) {
 	}
 }
 
-func (f *Ffmpeg) waitForExit(cmd *exec.Cmd, filePath string) {
+func (f *Ffmpeg) waitForExit(cmd *exec.Cmd, filePath, output string) {
 	if err := cmd.Wait(); err != nil {
 		logger.Error("ffmpeg exited with an error", zap.Any("cmd", cmd), zap.String("filepath", filePath), zap.Error(err))
 	} else {
+		err := os.Rename(fmt.Sprintf("%s_download.%s", output, f.c.FileFormat), fmt.Sprintf("%s.%s", output, f.c.FileFormat))
+		if err != nil {
+			logger.Error("Failed to rename ffmpeg", zap.String("filepath", filePath), zap.String("output", output), zap.Error(err))
+		}
+
 		file, err := os.Open(filePath)
 		if err != nil {
 			logger.Error("ffmpeg failed to open file", zap.String("filepath", filePath), zap.Error(err))

@@ -18,7 +18,7 @@ func NewProcess() *Process {
 	return &Process{}
 }
 
-func (p *Process) Run(name string, cmd *exec.Cmd, fileName string, handler func(line string), waitForExit func(cmd *exec.Cmd, fileName string)) error {
+func (p *Process) Run(name string, cmd *exec.Cmd, fileName, output string, handler func(line string), waitForExit func(cmd *exec.Cmd, fileName, output string)) error {
 	logger.Info("Starting process", zap.String("name", name))
 
 	cmd.SysProcAttr = GetSysProcAttr()
@@ -36,7 +36,7 @@ func (p *Process) Run(name string, cmd *exec.Cmd, fileName string, handler func(
 	}
 
 	go p.handleStdout(name, stdoutPipe, handler)
-	go waitForExit(cmd, fileName)
+	go waitForExit(cmd, fileName, output)
 
 	logger.Debug("process started successfully", zap.String("name", name))
 	return nil

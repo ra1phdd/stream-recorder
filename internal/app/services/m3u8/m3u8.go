@@ -298,10 +298,10 @@ func (m *M3u8) processSegments(segments []string, fileSegment *os.File, isNeedFl
 	for i := 0; i < len(segments); i++ {
 		m.buffer.Write(dataMap[i])
 		m.currentMemoryUsage += len(dataMap[i])
+	}
 
-		if m.currentMemoryUsage >= m.c.BufferSize*1024*1024 || isNeedFlush {
-			m.FlushToDisk(fileSegment)
-		}
+	if m.currentMemoryUsage >= m.c.BufferSize*1024*1024 || isNeedFlush {
+		m.FlushToDisk(fileSegment)
 	}
 }
 

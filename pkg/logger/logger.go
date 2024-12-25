@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-	"log"
+	"gopkg.in/natefinch/lumberjack.v2"
 	"os"
 	"time"
 )
@@ -27,20 +27,22 @@ func Init() {
 	fileEncoder = zapcore.NewJSONEncoder(config)
 	consoleEncoder = zapcore.NewConsoleEncoder(config)
 
-	err := os.MkdirAll("logs", os.ModePerm)
-	if err != nil {
-		log.Fatal("Ошибка создания папки logs", err.Error())
-	}
-	logFile, err := os.OpenFile("logs/stream-recorder.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		log.Fatal("Ошибка создания файла stream-recorder.log", err.Error())
-	}
-	writer = zapcore.AddSync(logFile)
+	writer = zapcore.AddSync(&lumberjack.Logger{
+		Filename:   "logs/stream-recorder.log",
+		MaxSize:    64,
+		MaxBackups: 3,
+		MaxAge:     30,
+		Compress:   true,
+	})
 
 	logLevel = zap.NewAtomicLevel()
 	logLevel.SetLevel(zapcore.InfoLevel)
 
-	ResetZapLogger(os.Stdout)
+	core := zapcore.NewTee(
+		zapcore.NewCore(fileEncoder, writer, logLevel),
+		zapcore.NewCore(consoleEncoder, zapcore.AddSync(os.Stdout), logLevel),
+	)
+	logger = zap.New(core, zap.AddStacktrace(zapcore.FatalLevel))
 }
 
 func SetLogLevel(level string) {
@@ -58,18 +60,6 @@ func SetLogLevel(level string) {
 	default:
 		logLevel.SetLevel(zapcore.InfoLevel)
 	}
-}
-
-func ResetZapLogger(buffer *os.File) {
-	if logger != nil {
-		_ = logger.Sync()
-	}
-
-	core := zapcore.NewTee(
-		zapcore.NewCore(fileEncoder, writer, logLevel),
-		zapcore.NewCore(consoleEncoder, zapcore.AddSync(buffer), logLevel),
-	)
-	logger = zap.New(core, zap.AddStacktrace(zapcore.FatalLevel))
 }
 
 func Debug(message string, fields ...zap.Field) {
