@@ -22,6 +22,17 @@ func main() {
 
 	go func() {
 		for {
+			err := tmp.RemoveEmptyDirs(a.Cfg.TempPATH)
+			if err != nil {
+				logger.Error("Error clearing empty directory", zap.Error(err))
+				return
+			}
+			time.Sleep(3 * time.Hour)
+		}
+	}()
+
+	go func() {
+		for {
 			if !a.Cfg.AutoCleanMediaPATH {
 				break
 			}
@@ -30,7 +41,7 @@ func main() {
 				logger.Error("Error clearing directory to time", zap.Error(err))
 				return
 			}
-			time.Sleep(time.Hour)
+			time.Sleep(3 * time.Hour)
 		}
 	}()
 

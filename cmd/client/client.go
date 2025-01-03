@@ -16,13 +16,27 @@ func main() {
 	}
 
 	go func() {
-		if !a.Cfg.AutoCleanMediaPATH {
-			return
+		for {
+			err := tmp.RemoveEmptyDirs(a.Cfg.TempPATH)
+			if err != nil {
+				logger.Error("Error clearing empty directory", zap.Error(err))
+				return
+			}
+			time.Sleep(3 * time.Hour)
 		}
-		err = tmp.ClearToTime(a.Cfg.MediaPATH, time.Duration(a.Cfg.TimeAutoCleanMediaPATH)*24*time.Hour)
-		if err != nil {
-			logger.Error("Error clearing directory to time", zap.Error(err))
-			return
+	}()
+
+	go func() {
+		for {
+			if !a.Cfg.AutoCleanMediaPATH {
+				break
+			}
+			err = tmp.ClearToTime(a.Cfg.MediaPATH, time.Duration(a.Cfg.TimeAutoCleanMediaPATH)*24*time.Hour)
+			if err != nil {
+				logger.Error("Error clearing directory to time", zap.Error(err))
+				return
+			}
+			time.Sleep(3 * time.Hour)
 		}
 	}()
 
