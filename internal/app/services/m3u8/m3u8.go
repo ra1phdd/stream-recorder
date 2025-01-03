@@ -337,7 +337,7 @@ func (m *M3u8) DownloadSegment(url string) ([]byte, error) {
 			if attempt >= maxRetries {
 				return nil, fmt.Errorf("max retries reached: %w", err)
 			}
-			time.Sleep(time.Second * time.Duration(attempt))
+			time.Sleep(3 * time.Second * time.Duration(attempt))
 			continue
 		}
 		defer resp.Body.Close()
@@ -352,7 +352,7 @@ func (m *M3u8) DownloadSegment(url string) ([]byte, error) {
 			if attempt >= maxRetries {
 				return nil, fmt.Errorf("max retries reached, last status: %d", resp.StatusCode)
 			}
-			time.Sleep(time.Second * time.Duration(attempt))
+			time.Sleep(3 * time.Second * time.Duration(attempt))
 			continue
 		}
 
@@ -362,7 +362,7 @@ func (m *M3u8) DownloadSegment(url string) ([]byte, error) {
 			if attempt >= maxRetries {
 				return nil, fmt.Errorf("max retries reached: %w", err)
 			}
-			time.Sleep(time.Second * time.Duration(attempt))
+			time.Sleep(3 * time.Second * time.Duration(attempt))
 			continue
 		}
 
