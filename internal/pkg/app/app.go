@@ -56,12 +56,6 @@ func setupApplication(workMode string) *App {
 
 	logger.SetLogLevel(a.Cfg.LoggerLevel)
 
-	//err = tmp.Clear("tmp")
-	//if err != nil {
-	//	logger.Error("Error clearing tmp", zap.Error(err))
-	//	return nil
-	//}
-
 	a.StreamersRepo = repository.NewStreamers()
 	a.RunnerProcess = runner.NewProcess()
 

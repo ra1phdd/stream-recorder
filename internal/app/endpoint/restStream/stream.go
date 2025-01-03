@@ -35,33 +35,56 @@ func New(am map[string]*m3u8.M3u8, as map[string]bool, rp *runner.Process, cfg *
 }
 
 func (e *Endpoint) CutStreamHandler(c *gin.Context) {
-	s := models.Streamers{
-		Platform: c.Query("platform"),
-		Username: c.Query("username"),
-	}
+	var streamers []models.Streamers
+	platforms := strings.Split(c.Query("platform"), ",")
+	usernames := strings.Split(c.Query("username"), ",")
 
-	if s.Platform == "" || s.Username == "" {
+	switch {
+	case len(platforms) == len(usernames):
+		for i := 0; i < len(platforms); i++ {
+			streamers = append(streamers, models.Streamers{Platform: platforms[i], Username: usernames[i]})
+		}
+	case len(platforms) == 1 && len(usernames) > 1:
+		for _, username := range usernames {
+			streamers = append(streamers, models.Streamers{Platform: platforms[0], Username: username})
+		}
+	case len(usernames) == 1 && len(platforms) > 1:
+		for _, platform := range platforms {
+			streamers = append(streamers, models.Streamers{Platform: platform, Username: usernames[0]})
+		}
+	case len(platforms) == 1 && platforms[0] == "", len(usernames) == 1 && usernames[0] == "":
 		c.JSON(http.StatusBadRequest, gin.H{"error": "platform or username is empty"})
 		return
-	}
-
-	streamerID := fmt.Sprintf("%s-%s", s.Platform, s.Username)
-	if _, exists := e.limiter[streamerID]; !exists {
-		e.limiter[streamerID] = rate.NewLimiter(rate.Every(60*time.Second), 1)
-	}
-
-	if e.am[streamerID] == nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "the streamer is not broadcasting live"})
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"error": "platform and username counts do not match"})
 		return
 	}
 
-	if e.limiter[streamerID].Allow() {
-		e.am[streamerID].ChangeIsNeedCut(true)
-		c.JSON(http.StatusOK, "success")
-	} else {
-		c.JSON(http.StatusTooManyRequests, gin.H{"error": "you can use cut no more than once per minute"})
-		return
+	var success, failed []string
+	for _, streamer := range streamers {
+		streamerID := fmt.Sprintf("%s-%s", streamer.Platform, streamer.Username)
+
+		if _, exists := e.limiter[streamerID]; !exists {
+			e.limiter[streamerID] = rate.NewLimiter(rate.Every(60*time.Second), 1)
+		}
+
+		if e.am[streamerID] == nil {
+			failed = append(failed, fmt.Sprintf("%s:%s (not live)", streamer.Platform, streamer.Username))
+			continue
+		}
+
+		if e.limiter[streamerID].Allow() {
+			e.am[streamerID].ChangeIsNeedCut(true)
+			success = append(success, fmt.Sprintf("%s:%s", streamer.Platform, streamer.Username))
+		} else {
+			failed = append(failed, fmt.Sprintf("%s:%s (rate limit exceeded)", streamer.Platform, streamer.Username))
+		}
 	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": strings.Join(success, ", "),
+		"failed":  strings.Join(failed, ", "),
+	})
 }
 
 func (e *Endpoint) DownloadM3u8Handler(c *gin.Context) {

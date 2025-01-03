@@ -324,28 +324,51 @@ func (m *M3u8) FlushToDisk(fileSegment *os.File) {
 }
 
 func (m *M3u8) DownloadSegment(url string) ([]byte, error) {
-	logger.Debugf("Starting download segment", m.sm.Username, m.sm.Platform, zap.String("url", url))
+	maxRetries := 5
+	var attempt int
 
-	resp, err := m.HTTPClient.Get(url)
-	if err != nil {
-		logger.Errorf("Failed to download segment", m.sm.Username, m.sm.Platform, zap.String("url", url), zap.Error(err))
-		return nil, err
+	for {
+		attempt++
+		logger.Debugf("Starting download segment", m.sm.Username, m.sm.Platform, zap.String("url", url), zap.Int("attempt", attempt))
+
+		resp, err := m.HTTPClient.Get(url)
+		if err != nil {
+			logger.Errorf("Failed to download segment", m.sm.Username, m.sm.Platform, zap.String("url", url), zap.Int("attempt", attempt), zap.Error(err))
+			if attempt >= maxRetries {
+				return nil, fmt.Errorf("max retries reached: %w", err)
+			}
+			time.Sleep(time.Second * time.Duration(attempt))
+			continue
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode == http.StatusNotFound {
+			logger.Warnf("Segment not found (404) for url", m.sm.Username, m.sm.Platform, zap.String("url", url))
+			return nil, errors.New("segment not found")
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			logger.Errorf("Received non-OK status code while downloading segment", m.sm.Username, m.sm.Platform, zap.String("url", url), zap.Int("status_code", resp.StatusCode), zap.Int("attempt", attempt))
+			if attempt >= maxRetries {
+				return nil, fmt.Errorf("max retries reached, last status: %d", resp.StatusCode)
+			}
+			time.Sleep(time.Second * time.Duration(attempt))
+			continue
+		}
+
+		data, err := io.ReadAll(resp.Body)
+		if err != nil {
+			logger.Errorf("Failed to read segment data", m.sm.Username, m.sm.Platform, zap.String("url", url), zap.Int("attempt", attempt), zap.Error(err))
+			if attempt >= maxRetries {
+				return nil, fmt.Errorf("max retries reached: %w", err)
+			}
+			time.Sleep(time.Second * time.Duration(attempt))
+			continue
+		}
+
+		logger.Debugf("Successfully downloaded segment", m.sm.Username, m.sm.Platform, zap.String("url", url), zap.Int("attempt", attempt))
+		return data, nil
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		logger.Errorf("Received non-OK status code while downloading segment", m.sm.Username, m.sm.Platform, zap.String("url", url), zap.Int("status_code", resp.StatusCode))
-		return nil, errors.New("failed to download segment")
-	}
-
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		logger.Errorf("Failed to read segment data", m.sm.Username, m.sm.Platform, zap.String("url", url), zap.Error(err))
-		return nil, err
-	}
-
-	logger.Debugf("Successfully downloaded segment", m.sm.Username, m.sm.Platform, zap.String("url", url))
-	return data, nil
 }
 
 func (m *M3u8) contains(slice []string, item string) bool {

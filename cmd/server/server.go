@@ -46,7 +46,7 @@ func setupServer(a *app.App) error {
 	a.Router.Use(noCache.NoCacheMiddleware())
 
 	// регистрируем эндпоинты
-	serviceStreamer := restStreamer.New(a.StreamersRepo, a.ActiveM3u8)
+	serviceStreamer := restStreamer.New(a.StreamersRepo, a.ActiveM3u8, a.ActiveStreamers)
 	serviceStream := restStream.New(a.ActiveM3u8, a.ActiveStreamers, a.RunnerProcess, a.Cfg)
 
 	// регистрируем маршруты

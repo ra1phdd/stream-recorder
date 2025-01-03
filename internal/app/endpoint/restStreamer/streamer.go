@@ -13,12 +13,14 @@ import (
 type Endpoint struct {
 	sr *repository.StreamersRepository
 	am map[string]*m3u8.M3u8
+	as map[string]bool
 }
 
-func New(sr *repository.StreamersRepository, am map[string]*m3u8.M3u8) *Endpoint {
+func New(sr *repository.StreamersRepository, am map[string]*m3u8.M3u8, as map[string]bool) *Endpoint {
 	return &Endpoint{
 		sr: sr,
 		am: am,
+		as: as,
 	}
 }
 
@@ -95,16 +97,27 @@ func (e *Endpoint) DeleteStreamerHandler(c *gin.Context) {
 		return
 	}
 
-	err := e.sr.Delete(s)
+	isFound, err := e.sr.IsFoundStreamer(s)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	if e.am[fmt.Sprintf("%s-%s", s.Platform, s.Username)] != nil {
-		e.am[fmt.Sprintf("%s-%s", s.Platform, s.Username)].ChangeIsCancel(true)
+	if isFound {
+		err = e.sr.Delete(s)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+		e.as[fmt.Sprintf("%s-%s", s.Platform, s.Username)] = false
+		if e.am[fmt.Sprintf("%s-%s", s.Platform, s.Username)] != nil {
+			e.am[fmt.Sprintf("%s-%s", s.Platform, s.Username)].ChangeIsCancel(true)
+		}
+		c.JSON(http.StatusOK, "success")
+		return
 	}
-	c.JSON(http.StatusOK, "success")
+	c.JSON(http.StatusInternalServerError, gin.H{"error": "the streamer does not exist in the DB"})
 }
 
 func (e *Endpoint) UpdateStreamerHandler(c *gin.Context) {
