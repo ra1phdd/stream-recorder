@@ -5,9 +5,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 	"log"
-	"stream-recorder/internal/app/endpoint/restStream"
-	"stream-recorder/internal/app/endpoint/restStreamer"
-	"stream-recorder/internal/app/middlewares/noCache"
+	"stream-recorder/internal/app/server/endpoint/restStream"
+	"stream-recorder/internal/app/server/endpoint/restStreamer"
+	"stream-recorder/internal/app/server/middlewares/noCache"
 	"stream-recorder/internal/app/services/tmp"
 	"stream-recorder/internal/pkg/app"
 	"stream-recorder/pkg/logger"
@@ -53,22 +53,22 @@ func main() {
 
 func setupServer(a *app.App) error {
 	gin.SetMode(a.Cfg.GinMode)
-	a.Router = gin.Default()
-	a.Router.Use(noCache.NoCacheMiddleware())
+	r := gin.Default()
+	r.Use(noCache.NoCacheMiddleware())
 
 	// регистрируем эндпоинты
 	serviceStreamer := restStreamer.New(a.StreamersRepo, a.ActiveM3u8, a.ActiveStreamers)
 	serviceStream := restStream.New(a.ActiveM3u8, a.ActiveStreamers, a.RunnerProcess, a.Cfg)
 
 	// регистрируем маршруты
-	a.Router.GET("/streamer/list", serviceStreamer.GetListStreamersHandler)
-	a.Router.GET("/streamer/add", serviceStreamer.AddStreamerHandler)
-	a.Router.GET("/streamer/update", serviceStreamer.UpdateStreamerHandler)
-	a.Router.GET("/streamer/delete", serviceStreamer.DeleteStreamerHandler)
-	a.Router.GET("/stream/cut", serviceStream.CutStreamHandler)
-	a.Router.GET("/stream/download_m3u8", serviceStream.DownloadM3u8Handler)
+	r.GET("/streamer/list", serviceStreamer.GetListStreamersHandler)
+	r.GET("/streamer/add", serviceStreamer.AddStreamerHandler)
+	r.GET("/streamer/update", serviceStreamer.UpdateStreamerHandler)
+	r.GET("/streamer/delete", serviceStreamer.DeleteStreamerHandler)
+	r.GET("/stream/cut", serviceStream.CutStreamHandler)
+	r.GET("/stream/download_m3u8", serviceStream.DownloadM3u8Handler)
 
-	return runServer(a.Router, a.Cfg.Port)
+	return runServer(r, a.Cfg.Port)
 }
 
 func runServer(router *gin.Engine, port int) error {

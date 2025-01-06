@@ -1,7 +1,6 @@
 package app
 
 import (
-	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 	"stream-recorder/internal/app/config"
 	"stream-recorder/internal/app/repository"
@@ -15,7 +14,6 @@ import (
 )
 
 type App struct {
-	Router        *gin.Engine
 	Cfg           *config.Config
 	StreamersRepo *repository.StreamersRepository
 	RunnerProcess *runner.Process

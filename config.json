@@ -1,0 +1,13 @@
+{
+  "port": 8000,
+  "logger_level": "debug",
+  "gin_mode": "release",
+  "media_path": "mnt",
+  "temp_path": "tmp",
+  "auto_clean_media_path": true,
+  "time_auto_clean_media_path": 7,
+  "time_check": 15,
+  "video_codec": "copy",
+  "audio_codec": "copy",
+  "file_format": "mp4"
+}

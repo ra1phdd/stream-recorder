@@ -1,0 +1,21 @@
+@import "../base/variables";
+
+header{
+  width: 25%;
+  min-height: calc(100vh - 25px);
+  background-color: $secondary-color;
+  nav {
+    margin: 15px 15px 0 15px;
+    a {
+      display: block;
+      color: $text-primary-color;
+      padding: 10px 20px;
+      text-decoration: none;
+      margin-bottom: 5px;
+      &.active, &:hover {
+        border-radius: 10px;
+        background-color: $primary-color;
+      }
+    }
+  }
+}

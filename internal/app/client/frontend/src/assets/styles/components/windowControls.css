@@ -1,0 +1,28 @@
+.controls{
+    height: 25px;
+    --wails-draggable:drag
+}
+.header-controls{
+    width: 25%;
+    height: 100%;
+    background-color: #2a2a2a;
+}
+.window-controls {
+    position: absolute;
+    top: 15px;
+    right: 15px;
+    display: flex;
+    justify-content: space-between;
+    z-index: 999;
+}
+.control-button {
+    padding-left: 15px;
+    background-color: transparent;
+    border: none;
+    font-size: 20px;
+    color: white;
+    cursor: pointer;
+}
+.control-button:hover {
+    color: #ccc;
+}
