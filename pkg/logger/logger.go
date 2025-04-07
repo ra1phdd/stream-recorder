@@ -1,103 +1,141 @@
 package logger
 
 import (
+	"context"
 	"fmt"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
+	multi "github.com/samber/slog-multi"
 	"gopkg.in/natefinch/lumberjack.v2"
+	"log/slog"
 	"os"
-	"time"
+	"runtime"
 )
 
-var logger *zap.Logger
-var logLevel zap.AtomicLevel
-var fileEncoder zapcore.Encoder
-var consoleEncoder zapcore.Encoder
-var writer zapcore.WriteSyncer
+type Logger struct {
+	log   *slog.Logger
+	level *slog.LevelVar
+}
 
-func Init() {
-	customTimeEncoder := func(t time.Time, enc zapcore.PrimitiveArrayEncoder) {
-		enc.AppendString(t.Format("2006-01-02 15:04:05"))
+const (
+	LevelTrace = slog.Level(-8)
+	LevelFatal = slog.Level(12)
+)
+
+var LevelNames = map[slog.Leveler]string{
+	LevelTrace: "TRACE",
+	LevelFatal: "FATAL",
+}
+
+func New() *Logger {
+	l := &Logger{
+		level: &slog.LevelVar{},
+	}
+	l.level.Set(slog.LevelInfo)
+
+	opts := &slog.HandlerOptions{
+		AddSource: true,
+		Level:     l.level,
+		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+			if a.Key == slog.LevelKey {
+				level := a.Value.Any().(slog.Level)
+				levelLabel, exists := LevelNames[level]
+				if !exists {
+					levelLabel = level.String()
+				}
+
+				a.Value = slog.StringValue(levelLabel)
+			}
+			if a.Key == "source" {
+				_, file, line, ok := runtime.Caller(10)
+				if ok {
+					a.Value = slog.StringValue(fmt.Sprintf("%s:%d", file, line))
+				}
+			}
+
+			return a
+		},
 	}
 
-	config := zap.NewProductionEncoderConfig()
-	config.EncodeLevel = zapcore.LowercaseLevelEncoder
-	config.EncodeTime = customTimeEncoder
-
-	fileEncoder = zapcore.NewJSONEncoder(config)
-	consoleEncoder = zapcore.NewConsoleEncoder(config)
-
-	writer = zapcore.AddSync(&lumberjack.Logger{
-		Filename:   "logs/stream-recorder.log",
-		MaxSize:    64,
-		MaxBackups: 3,
+	logFile := &lumberjack.Logger{
+		Filename:   "logs/main.log",
+		MaxSize:    32,
+		MaxBackups: 5,
 		MaxAge:     30,
 		Compress:   true,
-	})
+	}
 
-	logLevel = zap.NewAtomicLevel()
-	logLevel.SetLevel(zapcore.InfoLevel)
-
-	core := zapcore.NewTee(
-		zapcore.NewCore(fileEncoder, writer, logLevel),
-		zapcore.NewCore(consoleEncoder, zapcore.AddSync(os.Stdout), logLevel),
+	l.log = slog.New(
+		multi.Fanout(
+			slog.NewTextHandler(os.Stdout, opts),
+			slog.NewJSONHandler(logFile, opts),
+		),
 	)
-	logger = zap.New(core, zap.AddStacktrace(zapcore.FatalLevel))
+
+	return l
 }
 
-func SetLogLevel(level string) {
-	switch level {
+func (l *Logger) SetLogLevel(levelStr string) {
+	switch levelStr {
+	case "trace":
+		l.level.Set(LevelTrace)
 	case "debug":
-		logLevel.SetLevel(zapcore.DebugLevel)
-	case "warn":
-		logLevel.SetLevel(zapcore.WarnLevel)
-	case "error":
-		logLevel.SetLevel(zapcore.ErrorLevel)
-	case "fatal":
-		logLevel.SetLevel(zapcore.FatalLevel)
+		l.level.Set(slog.LevelDebug)
 	case "info":
-		logLevel.SetLevel(zapcore.InfoLevel)
+		l.level.Set(slog.LevelInfo)
+	case "warn":
+		l.level.Set(slog.LevelWarn)
+	case "error":
+		l.level.Set(slog.LevelError)
+	case "fatal":
+		l.level.Set(LevelFatal)
 	default:
-		logLevel.SetLevel(zapcore.InfoLevel)
+		l.level.Set(slog.LevelInfo)
 	}
 }
 
-func Debug(message string, fields ...zap.Field) {
-	logger.Debug(message, fields...)
+func (l *Logger) GetLogLevel() string {
+	switch l.level.Level() {
+	case LevelTrace:
+		return "trace"
+	case slog.LevelDebug:
+		return "debug"
+	case slog.LevelInfo:
+		return "info"
+	case slog.LevelWarn:
+		return "warn"
+	case slog.LevelError:
+		return "error"
+	case LevelFatal:
+		return "fatal"
+	}
+
+	return "info"
 }
 
-func Debugf(message string, username, platform string, fields ...zap.Field) {
-	logger.Debug(fmt.Sprintf("[%s/%s] ", platform, username)+message, fields...)
+func (l *Logger) Trace(msg string, args ...any) {
+	l.log.Log(context.Background(), LevelTrace, msg, args...)
 }
 
-func Info(message string, fields ...zap.Field) {
-	logger.Info(message, fields...)
+func (l *Logger) Debug(msg string, args ...any) {
+	l.log.Debug(msg, args...)
 }
 
-func Infof(message string, username, platform string, fields ...zap.Field) {
-	logger.Info(fmt.Sprintf("[%s/%s] ", platform, username)+message, fields...)
+func (l *Logger) Info(msg string, args ...any) {
+	l.log.Info(msg, args...)
 }
 
-func Warn(message string, fields ...zap.Field) {
-	logger.Warn(message, fields...)
+func (l *Logger) Warn(msg string, args ...any) {
+	l.log.Warn(msg, args...)
 }
 
-func Warnf(message string, username, platform string, fields ...zap.Field) {
-	logger.Warn(fmt.Sprintf("[%s/%s] ", platform, username)+message, fields...)
+func (l *Logger) Error(msg string, err error, args ...any) {
+	if err != nil {
+		l.log.Error(msg, append([]any{slog.Any("error", err.Error())}, args...)...)
+	} else {
+		l.log.Error(msg, args...)
+	}
 }
 
-func Error(message string, fields ...zap.Field) {
-	logger.Error(message, fields...)
-}
-
-func Errorf(message string, username, platform string, fields ...zap.Field) {
-	logger.Error(fmt.Sprintf("[%s/%s] ", platform, username)+message, fields...)
-}
-
-func Fatal(message string, fields ...zap.Field) {
-	logger.Fatal(message, fields...)
-}
-
-func Fatalf(message string, username, platform string, fields ...zap.Field) {
-	logger.Fatal(fmt.Sprintf("[%s/%s] ", platform, username)+message, fields...)
+func (l *Logger) Fatal(msg string, err error, args ...any) {
+	l.log.Log(context.Background(), LevelFatal, msg, append([]any{slog.Any("error", err.Error())}, args...)...)
+	os.Exit(1)
 }

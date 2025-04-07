@@ -2,7 +2,7 @@ package config
 
 import (
 	"encoding/json"
-	"fmt"
+	"log/slog"
 	"os"
 	"stream-recorder/pkg/logger"
 )
@@ -25,20 +25,32 @@ type Config struct {
 	GinMode string `json:"gin_mode"`
 }
 
-func New(configFile string, workMode string) (*Config, error) {
+func New(configFile string, log *logger.Logger, workMode string) (*Config, error) {
+	log.Debug("Initializing config from file", slog.Any("file", configFile), slog.String("mode", workMode))
+
 	data, err := os.ReadFile(configFile)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read config file: %w", err)
+		log.Error("Failed to read config file", err, slog.Any("file", configFile))
+		return nil, err
 	}
+	log.Debug("Successfully read config file", slog.Any("file", configFile))
 
 	cfg := Config{}
 	if err := json.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("failed to parse config JSON: %w", err)
+		log.Error("Failed to parse config JSON from file", err, slog.Any("file", configFile))
+		return nil, err
 	}
+	log.Debug("Successfully parsed config JSON")
 
+	log.Trace("Setting default config values")
 	cfg.setDefaults(workMode)
-	cfg.NormalizeEnv(workMode)
+	log.Debug("Defaults have been set")
 
+	log.Trace("Normalizing environment settings")
+	cfg.normalizeEnv(log, workMode)
+	log.Debug("Environment has been normalized")
+
+	log.Info("Config initialized successfully", slog.Any("file", configFile), slog.String("mode", workMode))
 	return &cfg, nil
 }
 
@@ -82,59 +94,61 @@ func (c *Config) setDefaults(workMode string) {
 	}
 }
 
-func (c *Config) NormalizeEnv(workMode string) {
+func (c *Config) normalizeEnv(log *logger.Logger, workMode string) {
 	switch c.LoggerLevel {
 	case "debug", "info", "warn", "error", "fatal":
+		break
 	default:
-		logger.Warn("Unknown LOGGER_LEVEL value. By default, 'info' is selected (available values - 'debug', 'info', 'warn', 'error', 'fatal')")
+		log.Warn("Unknown LOGGER_LEVEL value. By default, 'info' is selected (available values - 'debug', 'info', 'warn', 'error', 'fatal')")
 		c.LoggerLevel = "info"
 	}
 
 	if c.TimeCheck < 5 {
-		logger.Warn("The time to check for a stream is too short. By default, 5 second is selected")
+		log.Warn("The time to check for a stream is too short. By default, 5 second is selected")
 		c.TimeCheck = 5
 	}
 
 	if c.FFmpegPATH != "" {
 		if _, err := os.Stat(c.FFmpegPATH); os.IsNotExist(err) {
-			logger.Fatal("FFmpegPATH does not exist")
+			log.Fatal("FFmpegPATH does not exist", err)
 		}
 	}
 
 	if _, err := os.Stat(c.TempPATH); os.IsNotExist(err) {
 		err = os.MkdirAll(c.TempPATH, 0755)
 		if err != nil {
-			logger.Fatal("Failed to create temp directory")
+			log.Fatal("Failed to create temp directory", err)
 		}
 	}
 
 	if _, err := os.Stat(c.MediaPATH); os.IsNotExist(err) {
 		err = os.MkdirAll(c.MediaPATH, 0755)
 		if err != nil {
-			logger.Fatal("Failed to create media directory")
+			log.Fatal("Failed to create media directory", err)
 		}
 	}
 
 	if c.TimeAutoCleanMediaPATH < 1 {
-		logger.Warn("The time to auto clean media path is too short. By default, 1 day is selected")
+		log.Warn("The time to auto clean media path is too short. By default, 1 day is selected")
 		c.TimeAutoCleanMediaPATH = 1
 	}
 
 	if c.BufferSize < 32 {
-		logger.Warn("The buffer size cannot be less than 32 megabytes. 32 megabytes is selected by default.")
+		log.Warn("The buffer size cannot be less than 32 megabytes. 32 megabytes is selected by default.")
 		c.BufferSize = 32
 	}
 
 	if workMode == "server" {
 		if c.Port < 0 || c.Port > 65535 {
-			logger.Warn("The port must be between 1 and 65535, By default, 8080 is selected")
+			log.Warn("The port must be between 1 and 65535, By default, 8080 is selected")
 			c.Port = 8080
 		}
 
 		switch c.GinMode {
 		case "debug", "release", "test":
+			break
 		default:
-			logger.Warn("Unknown GIN_MODE value. By default, 'release' is selected (available values - 'debug', 'release', 'test')")
+			log.Warn("Unknown GIN_MODE value. By default, 'release' is selected (available values - 'debug', 'release', 'test')")
 			c.GinMode = "release"
 		}
 	}

@@ -1,159 +1,140 @@
 package repository
 
 import (
-	"database/sql"
 	"errors"
-	"go.uber.org/zap"
-	"stream-recorder/internal/app/services/models"
-	"stream-recorder/pkg/db"
+	"gorm.io/gorm"
+	"log/slog"
+	"stream-recorder/internal/app/models"
 	"stream-recorder/pkg/logger"
 )
 
-type StreamersRepository struct{}
+type StreamersRepository struct {
+	log *logger.Logger
+	db  *gorm.DB
+}
 
-func NewStreamers() *StreamersRepository {
-	return &StreamersRepository{}
+func NewStreamers(log *logger.Logger, db *gorm.DB) *StreamersRepository {
+	return &StreamersRepository{
+		log: log,
+		db:  db,
+	}
 }
 
 func (sr *StreamersRepository) Get() ([]models.Streamers, error) {
-	logger.Debug("Fetching streamers")
-	var s []models.Streamers
+	sr.log.Trace("Entering Get method")
 
-	rows, err := db.Conn.Query(`SELECT id, platform, username, quality, split_segments, time_segment FROM streamers`)
-	if err != nil {
-		return nil, err
+	var streamers []models.Streamers
+	result := sr.db.Find(&streamers)
+
+	if result.Error != nil {
+		sr.log.Error("Failed to fetch streamers", result.Error)
+		return nil, result.Error
 	}
-	defer func(rows *sql.Rows) {
-		err := rows.Close()
-		if err != nil {
-			logger.Error("Failed to close streamer rows", zap.Error(err))
-		}
-	}(rows)
-
-	found := false
-	var (
-		id, timeSegment             int
-		platform, username, quality string
-		splitSegments               bool
-	)
-	for rows.Next() {
-		err := rows.Scan(&id, &platform, &username, &quality, &splitSegments, &timeSegment)
-		if err != nil {
-			logger.Error("Failed to fetch streamers", zap.Error(err))
-			return nil, err
-		}
-
-		item := models.Streamers{
-			ID:            id,
-			Platform:      platform,
-			Username:      username,
-			Quality:       quality,
-			SplitSegments: splitSegments,
-			TimeSegment:   timeSegment,
-		}
-
-		s = append(s, item)
-
-		found = true
+	if len(streamers) == 0 {
+		sr.log.Warn("No streamers found in database")
+		return nil, nil
 	}
 
-	if !found {
-		return nil, errors.New("no streamers found")
-	}
-
-	logger.Debug("Streamers fetched successfully", zap.Any("streamers", s))
-	return s, nil
+	sr.log.Debug("Streamers fetched successfully", slog.Any("streamers", streamers))
+	return streamers, nil
 }
 
 func (sr *StreamersRepository) IsFoundStreamer(s models.Streamers) (bool, error) {
-	logger.Debug("Founding streamer in DB", zap.Any("s", s))
+	sr.log.Trace("Entering IsFoundStreamer method", slog.Any("searchParams", s))
 
-	var id int
-	err := db.Conn.QueryRow(`SELECT id FROM streamers WHERE username = $1 AND platform = $2`, s.Username, s.Platform).Scan(&id)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			logger.Debug("Streamer not found", zap.Any("streamer", s))
-			return false, nil
-		}
-		logger.Error("Database query failed", zap.Error(err))
-		return false, err
+	var streamer models.Streamers
+	result := sr.db.Where("username = ? AND platform = ?", s.Username, s.Platform).First(&streamer)
+
+	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		sr.log.Debug("Streamer not found", slog.Any("streamer", s))
+		return false, nil
+	}
+	if result.Error != nil {
+		sr.log.Error("Database query failed", result.Error)
+		return false, result.Error
 	}
 
-	logger.Debug("Streamer found successfully", zap.Int("id", id), zap.Any("streamer", s))
+	sr.log.Debug("Streamer found successfully", slog.Int("id", streamer.ID), slog.Any("streamer", s))
 	return true, nil
 }
 
 func (sr *StreamersRepository) Add(s models.Streamers) error {
-	logger.Debug("Adding new row in table streamers", zap.Any("streamers", s))
+	sr.log.Trace("Entering Add method", slog.Any("streamerToAdd", s))
 
-	_, err := db.Conn.Exec(`INSERT INTO streamers (platform, username, quality, split_segments, time_segment) VALUES ($1, $2, $3, $4, $5)`, s.Platform, s.Username, s.Quality, s.SplitSegments, s.TimeSegment)
-	if err != nil {
-		logger.Error("Failed to add new row in table streamers", zap.Error(err))
+	if err := sr.db.Create(&s).Error; err != nil {
+		sr.log.Error("Failed to add new streamer", err, slog.Any("streamer", s))
 		return err
 	}
-	logger.Debug("New row in table streamers added successfully")
 
+	sr.log.Debug("Streamer added successfully", slog.Any("streamer", s))
 	return nil
 }
 
 func (sr *StreamersRepository) Delete(s models.Streamers) error {
-	logger.Debug("Deleting row in table streamers", zap.Any("streamers", s))
+	sr.log.Trace("Entering Delete method", slog.Any("streamerToDelete", s))
 
-	_, err := db.Conn.Exec(`DELETE FROM streamers WHERE platform = $1 AND username = $2`, s.Platform, s.Username)
-	if err != nil {
-		logger.Error("Failed to delete row in table streamers", zap.Error(err))
-		return err
+	result := sr.db.Where("platform = ? AND username = ?", s.Platform, s.Username).Delete(&models.Streamers{})
+	if result.Error != nil {
+		sr.log.Error("Failed to delete streamer", result.Error, slog.Any("streamer", s))
+		return result.Error
 	}
-	logger.Debug("Row in table streamers deleted successfully")
 
+	if result.RowsAffected == 0 {
+		sr.log.Warn("No rows deleted — streamer not found", slog.Any("streamer", s))
+	} else {
+		sr.log.Debug("Streamer deleted successfully", slog.Any("streamer", s))
+	}
 	return nil
 }
 
 func (sr *StreamersRepository) UpdateQuality(platform, username, quality string) error {
-	logger.Debug("Updating quality for streamer", zap.String("platform", platform), zap.String("username", username), zap.String("quality", quality))
+	sr.log.Trace("Entering UpdateQuality method", slog.String("platform", platform), slog.String("username", username), slog.String("quality", quality))
 
-	_, err := db.Conn.Exec(`UPDATE streamers SET quality = $1 WHERE platform = $2 AND username = $3`, quality, platform, username)
-	if err != nil {
-		logger.Error("Failed to update quality for streamer", zap.String("platform", platform), zap.String("username", username), zap.Error(err))
-		return err
+	result := sr.db.Model(&models.Streamers{}).
+		Where("platform = ? AND username = ?", platform, username).
+		Update("quality", quality)
+
+	if result.Error != nil {
+		sr.log.Error("Failed to update quality", result.Error, slog.String("platform", platform), slog.String("username", username))
+		return result.Error
 	}
-	logger.Debug("Quality for streamer updated successfully", zap.String("platform", platform), zap.String("username", username))
 
+	if result.RowsAffected == 0 {
+		sr.log.Warn("No streamer found to update quality", slog.String("platform", platform), slog.String("username", username))
+	} else {
+		sr.log.Debug("Quality updated successfully", slog.String("platform", platform), slog.String("username", username))
+	}
 	return nil
 }
 
-func (sr *StreamersRepository) UpdateSplitSegments(platform, username string, splitSegments bool, timeSegment int) error {
-	logger.Debug("Updating split_segments and optionally time_segment for streamer",
-		zap.String("platform", platform),
-		zap.String("username", username),
-		zap.Bool("split_segments", splitSegments),
-		zap.Any("time_segment", timeSegment),
+func (sr *StreamersRepository) UpdateSegmentSettings(platform, username string, splitSegments bool, timeSegment int) error {
+	sr.log.Trace("Entering UpdateSegmentSettings method",
+		slog.String("platform", platform),
+		slog.String("username", username),
+		slog.Bool("split_segments", splitSegments),
+		slog.Int("time_segment", timeSegment),
 	)
 
-	query := `UPDATE streamers SET split_segments = $1`
-	args := []interface{}{splitSegments, platform, username}
-
+	updateData := map[string]interface{}{
+		"split_segments": splitSegments,
+	}
 	if timeSegment != 0 {
-		query += `, time_segment = $2`
-		args = append([]interface{}{splitSegments, timeSegment, platform, username}, args[3:]...)
+		updateData["time_segment"] = timeSegment
 	}
 
-	query += ` WHERE platform = $3 AND username = $4`
+	result := sr.db.Model(&models.Streamers{}).
+		Where("platform = ? AND username = ?", platform, username).
+		Updates(updateData)
 
-	_, err := db.Conn.Exec(query, args...)
-	if err != nil {
-		logger.Error("Failed to update split_segments and/or time_segment for streamer",
-			zap.String("platform", platform),
-			zap.String("username", username),
-			zap.Error(err),
-		)
-		return err
+	if result.Error != nil {
+		sr.log.Error("Failed to update split_segments/time_segment", result.Error, slog.Any("updateData", updateData))
+		return result.Error
 	}
 
-	logger.Debug("Successfully updated split_segments and optionally time_segment for streamer",
-		zap.String("platform", platform),
-		zap.String("username", username),
-	)
-
+	if result.RowsAffected == 0 {
+		sr.log.Warn("No streamer found to update split_segments/time_segment", slog.String("platform", platform), slog.String("username", username))
+	} else {
+		sr.log.Debug("split_segments/time_segment updated successfully", slog.String("platform", platform), slog.String("username", username))
+	}
 	return nil
 }

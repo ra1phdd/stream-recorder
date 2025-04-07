@@ -6,19 +6,19 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"go.uber.org/zap"
 	"io"
-	"math/rand"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
-	"stream-recorder/internal/app/services/models"
+	"stream-recorder/internal/app/models"
 	"stream-recorder/pkg/logger"
 	"strings"
 	"time"
 )
 
 type TwitchAPI struct {
+	log        *logger.Logger
 	HTTPClient *http.Client
 	ClientID   string
 	DeviceID   string
@@ -37,41 +37,21 @@ const (
 	IntegrityURL = "https://gql.twitch.tv/integrity"
 )
 
-func NewTwitch(clientId, deviceId string) *TwitchAPI {
+func NewTwitch(log *logger.Logger, clientId, deviceId string) *TwitchAPI {
 	return &TwitchAPI{
+		log:        log,
 		HTTPClient: &http.Client{Timeout: 60 * time.Second},
 		ClientID:   clientId,
 		DeviceID:   deviceId,
 	}
 }
 
-func RandomToken(length int, choices string) (string, error) {
-	if length <= 0 {
-		return "", errors.New("length must be greater than 0")
-	}
-	if len(choices) == 0 {
-		return "", errors.New("choices string must not be empty")
-	}
-
-	var result strings.Builder
-	choicesLen := len(choices)
-
-	r := rand.New(rand.NewSource(time.Now().UnixNano()))
-
-	for i := 0; i < length; i++ {
-		randomIndex := r.Intn(choicesLen)
-		result.WriteByte(choices[randomIndex])
-	}
-
-	return result.String(), nil
-}
-
 func (t *TwitchAPI) fetchIntegrity() (string, error) {
-	logger.Debug("Fetching client integrity token", zap.String("url", IntegrityURL))
+	t.log.Debug("Fetching client integrity token", slog.String("url", IntegrityURL))
 
 	req, err := http.NewRequest("POST", IntegrityURL, nil)
 	if err != nil {
-		logger.Error("Failed to create request", zap.Error(err))
+		t.log.Error("Failed to create request", err)
 		return "", err
 	}
 	req.Header.Add("X-Device-Id", t.DeviceID)
@@ -79,29 +59,29 @@ func (t *TwitchAPI) fetchIntegrity() (string, error) {
 
 	resp, err := t.HTTPClient.Do(req)
 	if err != nil {
-		logger.Error("Failed to fetch integrity token", zap.Error(err))
+		t.log.Error("Failed to fetch integrity token", err)
 		return "", err
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		logger.Error("Failed to read response body", zap.Error(err))
+		t.log.Error("Failed to read response body", err)
 		return "", err
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		logger.Error("HTTP error in fetchIntegrity", zap.String("response", string(body)), zap.Int("status_code", resp.StatusCode))
+		t.log.Error("HTTP error in fetchIntegrity", nil, slog.String("response", string(body)), slog.Int("status_code", resp.StatusCode))
 		return "", err
 	}
 
 	var integrityResp IntegrityResponse
 	if err := json.Unmarshal(body, &integrityResp); err != nil {
-		logger.Error("Failed to unmarshal response", zap.Error(err))
+		t.log.Error("Failed to unmarshal response", err)
 		return "", err
 	}
 
-	logger.Debug("Successfully fetched integrity token")
+	t.log.Debug("Successfully fetched integrity token")
 	return integrityResp.Token, nil
 }
 
@@ -119,7 +99,7 @@ func (t *TwitchAPI) gqlPersistedQuery(operationName, sha256Hash string, variable
 }
 
 func (t *TwitchAPI) call(data interface{}) (interface{}, error) {
-	logger.Debug("Making TwitchAPI call", zap.String("url", GqlURL))
+	t.log.Debug("Making TwitchAPI call", slog.String("url", GqlURL))
 
 	ci, err := t.fetchIntegrity()
 	if err != nil {
@@ -128,13 +108,13 @@ func (t *TwitchAPI) call(data interface{}) (interface{}, error) {
 
 	jsonData, err := json.Marshal(data)
 	if err != nil {
-		logger.Error("Failed to marshal request data", zap.Error(err))
+		t.log.Error("Failed to marshal request data", err)
 		return nil, err
 	}
 
 	req, err := http.NewRequest("POST", GqlURL, bytes.NewBuffer(jsonData))
 	if err != nil {
-		logger.Error("Failed to create request", zap.Error(err))
+		t.log.Error("Failed to create request", err)
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
@@ -144,34 +124,34 @@ func (t *TwitchAPI) call(data interface{}) (interface{}, error) {
 
 	resp, err := t.HTTPClient.Do(req)
 	if err != nil {
-		logger.Error("Failed to execute TwitchAPI call", zap.Error(err))
+		t.log.Error("Failed to execute TwitchAPI call", err)
 		return nil, err
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		logger.Error("Failed to read response body", zap.Error(err))
+		t.log.Error("Failed to read response body", err)
 		return nil, err
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		logger.Error("HTTP error in TwitchAPI call", zap.String("response", string(body)), zap.Int("status_code", resp.StatusCode))
+		t.log.Error("HTTP error in TwitchAPI call", nil, slog.String("response", string(body)), slog.Int("status_code", resp.StatusCode))
 		return nil, err
 	}
 
 	var result interface{}
 	if err := json.Unmarshal(body, &result); err != nil {
-		logger.Error("Failed to unmarshal response", zap.Error(err))
+		t.log.Error("Failed to unmarshal response", err)
 		return nil, err
 	}
 
-	logger.Debug("TwitchAPI call successful")
+	t.log.Debug("TwitchAPI call successful")
 	return result, nil
 }
 
 func (t *TwitchAPI) accessToken(channel string) (map[string]interface{}, error) {
-	logger.Debug("Fetching access token", zap.String("channel", channel))
+	t.log.Debug("Fetching access token", slog.String("channel", channel))
 
 	variables := map[string]interface{}{
 		"isLive":     true,
@@ -184,29 +164,29 @@ func (t *TwitchAPI) accessToken(channel string) (map[string]interface{}, error) 
 
 	response, err := t.call(query)
 	if err != nil {
-		logger.Error("Failed to get access token", zap.String("channel", channel), zap.Error(err))
+		t.log.Error("Failed to get access token", nil, slog.String("channel", channel), err)
 		return nil, err
 	}
 
 	results, ok := response.(map[string]interface{})
 	if !ok {
-		logger.Error("Unexpected response format for access token", zap.Any("response", response))
+		t.log.Error("Unexpected response format for access token", nil, slog.Any("response", response))
 		return nil, errors.New("unexpected response format")
 	}
 
 	data, ok := results["data"].(map[string]interface{})
 	if !ok {
-		logger.Error("Data not found in response", zap.Any("response", results))
+		t.log.Error("Data not found in response", nil, slog.Any("response", results))
 		return nil, errors.New("data not found in response")
 	}
 
 	streamToken, ok := data["streamPlaybackAccessToken"].(map[string]interface{})
 	if !ok {
-		logger.Error("streamPlaybackAccessToken not found", zap.Any("response", data))
+		t.log.Error("streamPlaybackAccessToken not found", nil, slog.Any("response", data))
 		return nil, errors.New("streamPlaybackAccessToken not found")
 	}
 
-	logger.Debug("Access token fetched successfully", zap.String("channel", channel))
+	t.log.Debug("Access token fetched successfully", slog.String("channel", channel))
 	return map[string]interface{}{
 		"signature": streamToken["signature"],
 		"value":     streamToken["value"],
@@ -216,7 +196,7 @@ func (t *TwitchAPI) accessToken(channel string) (map[string]interface{}, error) 
 func (t *TwitchAPI) GetMasterPlaylist(channel string) (string, error) {
 	accessToken, err := t.accessToken(channel)
 	if err != nil {
-		logger.Error("Failed to get access token", zap.String("channel", channel), zap.Error(err))
+		t.log.Error("Failed to get access token", nil, slog.String("channel", channel), err)
 		return "", err
 	}
 
@@ -226,14 +206,14 @@ func (t *TwitchAPI) GetMasterPlaylist(channel string) (string, error) {
 func (t *TwitchAPI) FindMediaPlaylist(masterPlaylist, quality string) (string, error) {
 	resp, err := http.Get(masterPlaylist)
 	if err != nil {
-		logger.Error("Failed to get master playlist", zap.String("masterPlaylist", masterPlaylist), zap.Error(err))
+		t.log.Error("Failed to get master playlist", nil, slog.String("masterPlaylist", masterPlaylist), err)
 		return "", err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		if resp.StatusCode != http.StatusNotFound {
-			logger.Error("HTTP error in find media playlist", zap.Int("status_code", resp.StatusCode))
+			t.log.Error("HTTP error in find media playlist", nil, slog.Int("status_code", resp.StatusCode))
 		}
 
 		return "", fmt.Errorf("HTTP error: %d", resp.StatusCode)
@@ -246,7 +226,7 @@ func (t *TwitchAPI) FindMediaPlaylist(masterPlaylist, quality string) (string, e
 		line := scanner.Text()
 
 		if strings.HasPrefix(line, "#EXT-X-STREAM-INF") {
-			logger.Debug("Found tag #EXT-X-STREAM-INF", zap.String("line", line))
+			t.log.Debug("Found tag #EXT-X-STREAM-INF", slog.String("line", line))
 
 			if resStart := strings.Index(line, "RESOLUTION="); resStart != -1 {
 				resEnd := strings.Index(line[resStart:], ",")
@@ -261,19 +241,19 @@ func (t *TwitchAPI) FindMediaPlaylist(masterPlaylist, quality string) (string, e
 		}
 
 		if strings.HasPrefix(line, "http") {
-			logger.Debug("Found URL resolution", zap.String("line", line))
+			t.log.Debug("Found URL resolution", slog.String("line", line))
 			resUri[resolution] = line
 		}
 	}
 
 	if err := scanner.Err(); err != nil {
-		logger.Error("Buffer scanning error", zap.Error(err))
+		t.log.Error("Buffer scanning error", err)
 		return "", err
 	}
 
 	needUri, err := t.FindNeedQuality(resUri, quality)
 	if err != nil {
-		logger.Error("Failed to find need quality", zap.String("quality", quality), zap.Error(err))
+		t.log.Error("Failed to find need quality", err, slog.String("quality", quality))
 		return "", err
 	}
 
@@ -320,56 +300,56 @@ func (t *TwitchAPI) FindNeedQuality(resUri map[string]string, quality string) (s
 }
 
 func (t *TwitchAPI) ParseM3u8(line string, m *models.StreamMetadata) (skipCount int, isSegment bool, segmentURL string) {
-	if strings.HasPrefix(line, "#EXT-X-TARGETDURATION") && !m.SkipTargetDuration {
-		logger.Debugf("Found tag #EXT-X-TARGETDURATION", m.Username, m.Platform, zap.String("line", line))
+	if strings.HasPrefix(line, "#EXT-X-TARGETDURATION") && !*m.SkipTargetDuration {
+		t.log.Debug(fmt.Sprintf("[%s/%s] Found tag #EXT-X-TARGETDURATION", m.Username, m.Platform), slog.String("line", line))
 
 		parts := strings.Split(line, ":")
 		if len(parts) != 2 {
-			logger.Errorf("Failed to parse target duration", m.Username, m.Platform, zap.String("line", line))
+			t.log.Error(fmt.Sprintf("[%s/%s] Failed to parse target duration", m.Username, m.Platform), nil, slog.String("line", line))
 			return
 		}
 
 		parsedTime, err := strconv.Atoi(parts[1])
 		if err != nil {
-			logger.Errorf("Failed to parse tag #EXT-X-TARGETDURATION", m.Username, m.Platform, zap.String("line", line), zap.Any("parts", parts))
+			t.log.Error(fmt.Sprintf("[%s/%s] Failed to parse tag #EXT-X-TARGETDURATION", m.Username, m.Platform), nil, slog.String("line", line), slog.Any("parts", parts))
 			return
 		}
 
-		m.WaitingTime = time.Duration(parsedTime) * time.Second
-		m.SkipTargetDuration = true
+		*m.WaitingTime = time.Duration(parsedTime) * time.Second
+		*m.SkipTargetDuration = true
 		return
 	}
 
 	if strings.HasPrefix(line, "#EXT-X-TWITCH-TOTAL-SECS") {
-		logger.Debugf("Found tag #EXT-X-TWITCH-TOTAL-SECS", m.Username, m.Platform, zap.String("line", line))
+		t.log.Debug(fmt.Sprintf("[%s/%s] Found tag #EXT-X-TWITCH-TOTAL-SECS", m.Username, m.Platform), slog.String("line", line))
 
 		parts := strings.Split(line, ":")
 		if len(parts) != 2 {
-			logger.Errorf("Failed to split total seconds in parts", m.Username, m.Platform, zap.String("line", line), zap.Any("parts", parts))
+			t.log.Error(fmt.Sprintf("[%s/%s] Failed to split total seconds in parts", m.Username, m.Platform), nil, slog.String("line", line), slog.Any("parts", parts))
 			return
 		}
 
 		timeParts := strings.Split(parts[1], ".")
 		if len(timeParts) != 2 {
-			logger.Errorf("Failed to split total seconds in timeParts", m.Username, m.Platform, zap.String("line", line), zap.Any("timeParts", timeParts))
+			t.log.Error(fmt.Sprintf("[%s/%s] Failed to split total seconds in timeParts", m.Username, m.Platform), nil, slog.String("line", line), slog.Any("timeParts", timeParts))
 			return
 		}
 
 		parsedTime, err := strconv.Atoi(timeParts[0])
 		if err != nil {
-			logger.Errorf("Error converting timeParts[0] to a number", m.Username, m.Platform, zap.String("line", line), zap.Any("timeParts", timeParts), zap.Error(err))
+			t.log.Error(fmt.Sprintf("[%s/%s] Error converting timeParts[0] to a number", m.Username, m.Platform), nil, slog.String("line", line), slog.Any("timeParts", timeParts), err)
 			return
 		}
 
-		m.TotalDurationStream = time.Duration(parsedTime) * time.Second
-		if m.StartDurationStream == 0 {
+		*m.TotalDurationStream = time.Duration(parsedTime) * time.Second
+		if *m.StartDurationStream == 0 {
 			m.StartDurationStream = m.TotalDurationStream
 		}
 		return
 	}
 
 	if strings.HasPrefix(line, "#EXTINF") && strings.Contains(line, `Amazon`) {
-		logger.Debugf("Found ad tag 'Amazon'", m.Username, m.Platform, zap.String("line", line))
+		t.log.Debug(fmt.Sprintf("[%s/%s] Found ad tag 'Amazon'", m.Username, m.Platform), slog.String("line", line))
 		skipCount = 1
 		return
 	}

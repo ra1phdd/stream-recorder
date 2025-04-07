@@ -1,67 +1,126 @@
 package app
 
 import (
-	"go.uber.org/zap"
+	"fmt"
+	"github.com/gin-gonic/gin"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
 	"stream-recorder/internal/app/config"
+	"stream-recorder/internal/app/handlers"
+	"stream-recorder/internal/app/models"
 	"stream-recorder/internal/app/repository"
-	"stream-recorder/internal/app/services/m3u8"
-	"stream-recorder/internal/app/services/runner"
+	"stream-recorder/internal/app/services/scheduler"
+	"stream-recorder/internal/app/services/state"
 	"stream-recorder/internal/app/services/streamlink"
-	"stream-recorder/internal/app/services/streams"
-	"stream-recorder/pkg/db"
-	embedded "stream-recorder/pkg/embed"
+	"stream-recorder/internal/app/services/utils"
 	"stream-recorder/pkg/logger"
+	"time"
 )
 
 type App struct {
-	Cfg           *config.Config
-	StreamersRepo *repository.StreamersRepository
-	RunnerProcess *runner.Process
-	Streamlink    *streamlink.Streamlink
-	CheckStreams  *streams.Streams
-
-	ActiveM3u8      map[string]*m3u8.M3u8
-	ActiveStreamers map[string]bool
+	log           *logger.Logger
+	db            *gorm.DB
+	cfg           *config.Config
+	streamersRepo *repository.StreamersRepository
+	streamlink    *streamlink.Streamlink
+	scheduler     *scheduler.Scheduler
+	state         *state.State
+	utils         *utils.Utils
 }
 
-func New(workMode string) (*App, error) {
-	logger.Init()
-
-	if err := embedded.Init(); err != nil {
-		return nil, err
+func New(workMode string) error {
+	a := &App{
+		log:   logger.New(),
+		state: state.New(),
 	}
-
-	if err := db.Init("db/stream-recorder.db"); err != nil {
-		return nil, err
-	}
-
-	a := setupApplication(workMode)
-
-	return a, nil
-}
-
-func setupApplication(workMode string) *App {
-	var a = &App{}
-	a.ActiveM3u8 = make(map[string]*m3u8.M3u8)
-	a.ActiveStreamers = make(map[string]bool)
 
 	var err error
-	a.Cfg, err = config.New("config.json", workMode)
+	a.db, err = gorm.Open(sqlite.Open("stream-recorder.db"), &gorm.Config{})
 	if err != nil {
-		logger.Fatal("Error loading config", zap.Error(err))
-		return nil
+		return err
+	}
+	err = a.db.AutoMigrate(models.Streamers{})
+	if err != nil {
+		return err
 	}
 
-	logger.SetLogLevel(a.Cfg.LoggerLevel)
+	a.cfg, err = config.New("config.json", a.log, workMode)
+	if err != nil {
+		a.log.Fatal("Error loading config", err)
+		return nil
+	}
+	a.log.SetLogLevel(a.cfg.LoggerLevel)
 
-	a.StreamersRepo = repository.NewStreamers()
-	a.RunnerProcess = runner.NewProcess()
+	a.streamersRepo = repository.NewStreamers(a.log, a.db)
+	a.streamlink = streamlink.New(a.log, "twitch")
+	a.utils = utils.New(a.log)
+	a.scheduler = scheduler.New(a.log, a.streamersRepo, a.streamlink, a.cfg, a.state, a.utils)
 
-	a.Streamlink = streamlink.New()
-	a.CheckStreams = streams.New(a.StreamersRepo, a.Streamlink, a.RunnerProcess, a.Cfg, a.ActiveStreamers, a.ActiveM3u8)
+	go a.scheduler.Recovery()
+	go a.scheduler.CheckingForStreams()
 
-	a.CheckStreams.Recovery()
+	go func() {
+		for {
+			err := a.utils.RemoveEmptyDirs(a.cfg.TempPATH)
+			if err != nil {
+				a.log.Error("Error clearing empty directory", err)
+				return
+			}
+			time.Sleep(3 * time.Hour)
+		}
+	}()
 
-	go a.CheckStreams.CheckingForStreams()
-	return a
+	go func() {
+		for {
+			if !a.cfg.AutoCleanMediaPATH {
+				break
+			}
+			err = a.utils.ClearToTime(a.cfg.MediaPATH, time.Duration(a.cfg.TimeAutoCleanMediaPATH)*24*time.Hour)
+			if err != nil {
+				a.log.Error("Error clearing directory to time", err)
+				return
+			}
+			time.Sleep(3 * time.Hour)
+		}
+	}()
+
+	if workMode == "server" {
+		return setupServer(a)
+	}
+
+	return nil
+}
+
+func setupServer(a *App) error {
+	gin.SetMode(a.cfg.GinMode)
+	r := gin.Default()
+	r.Use(func(c *gin.Context) {
+		c.Header("Cache-Control", "no-cache, no-store, must-revalidate")
+		c.Header("Pragma", "no-cache")
+		c.Header("Expires", time.Now().Add(-1*time.Second).Format(time.RFC1123))
+		c.Next()
+	})
+
+	// регистрируем эндпоинты
+	serviceStreamer := handlers.NewStreamer(a.log, a.streamersRepo, a.state)
+	serviceStream := handlers.NewStream(a.log, a.state, a.cfg)
+
+	// регистрируем маршруты
+	r.GET("/streamer/list", serviceStreamer.GetStreamersHandler)
+	r.GET("/streamer/add", serviceStreamer.AddStreamerHandler)
+	r.GET("/streamer/update", serviceStreamer.UpdateStreamerHandler)
+	r.GET("/streamer/delete", serviceStreamer.DeleteStreamerHandler)
+	r.GET("/stream/cut", serviceStream.CutStreamHandler)
+	//r.GET("/stream/download_m3u8", serviceStream.DownloadM3u8Handler)
+
+	return runServer(r, a.cfg.Port)
+}
+
+func runServer(router *gin.Engine, port int) error {
+	err := router.Run(fmt.Sprintf(":%d", port))
+	if err != nil {
+		return err
+	}
+
+	return nil
 }

@@ -1,6 +1,6 @@
 {
-  "port": 8000,
-  "logger_level": "debug",
+  "port": 8080,
+  "logger_level": "info",
   "gin_mode": "release",
   "media_path": "mnt",
   "temp_path": "tmp",
