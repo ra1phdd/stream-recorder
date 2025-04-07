@@ -1,11 +1,9 @@
 build/
-db/
 logs/
 mnt/
 tmp/
-pkg/embed/ffmpeg/
+pkg/ffmpeg/bin/
 .env
 config.json
 todo.txt
-internal/app/client/bin
-internal/app/client/frontend/node_modules
+stream-recorder.db
