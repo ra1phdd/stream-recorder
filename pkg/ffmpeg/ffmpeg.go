@@ -71,18 +71,23 @@ func (f *FFmpeg) GetFileWithExt() string {
 	return "tmp/ffmpeg"
 }
 
-func (f *FFmpeg) Execute(inputPath, outputPath string) error {
+func (f *FFmpeg) Execute(inputPath []string, outputPath string) error {
 	if len(f.errs) > 0 {
 		return errors.New(strings.Join(f.errs, "\n"))
 	}
 
 	args := f.startArgs
-	args = append(args, "-i", inputPath)
+	for _, path := range inputPath {
+		args = append(args, "-i", path)
+	}
 	args = append(args, f.endArgs...)
 	args = append(args, outputPath)
 
 	f.cmd = exec.Command(f.GetFileWithExt(), args...)
 	f.cmd.SysProcAttr = GetSysProcAttr()
+
+	f.cmd.Stdout = os.Stdout
+	f.cmd.Stderr = os.Stderr
 
 	if err := f.cmd.Run(); err != nil {
 		return err
@@ -93,6 +98,7 @@ func (f *FFmpeg) Execute(inputPath, outputPath string) error {
 
 func (f *FFmpeg) Clear() *FFmpeg {
 	f.startArgs = f.startArgs[:0]
+	f.endArgs = f.endArgs[:0]
 	return f
 }
 
@@ -159,6 +165,12 @@ func (f *FFmpeg) AudioRate(audioRate int) *FFmpeg {
 // Async is an analog of the -async parameter in ffmpeg
 func (f *FFmpeg) Async(async int) *FFmpeg {
 	f.endArgs = append(f.endArgs, "-async", fmt.Sprint(async))
+	return f
+}
+
+// Vsync is an analog of the -async parameter in ffmpeg
+func (f *FFmpeg) Vsync(vsync int) *FFmpeg {
+	f.endArgs = append(f.endArgs, "-vsync", fmt.Sprint(vsync))
 	return f
 }
 

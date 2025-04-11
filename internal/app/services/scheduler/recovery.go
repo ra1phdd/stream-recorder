@@ -63,7 +63,7 @@ func (s *Scheduler) Recovery() {
 			FpsMode("cfr").
 			VideoCodec("copy").
 			AudioCodec("copy").
-			Execute(filePath, output)
+			Execute([]string{filePath}, output)
 		if err != nil {
 			s.log.Error("Error run ffmpeg", err, slog.String("path", filePath), slog.String("output", output))
 		}

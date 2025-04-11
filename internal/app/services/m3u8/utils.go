@@ -14,14 +14,10 @@ func (m *M3u8) getShortFileName(url string) string {
 	return hex.EncodeToString(hasher.Sum(nil))
 }
 
-func (m *M3u8) generateFilePaths() (fileSegments, pathFileWithoutExt string) {
-	dirName := fmt.Sprintf("%s_%s_%s", m.sm.Platform, m.sm.Username, m.currentDate)
+func (m *M3u8) generateFilePaths(streamDir string) (string, string) {
 	fileName := fmt.Sprintf("%s_%s_%s", m.sm.Platform, m.sm.Username, m.formatDuration(*m.sm.StartDurationStream))
 
-	fileSegments = filepath.Join(m.c.TempPATH, dirName, fileName+".txt")
-	pathFileWithoutExt = filepath.Join(m.c.MediaPATH, dirName, fileName)
-
-	return fileSegments, pathFileWithoutExt
+	return filepath.Join(m.c.TempPATH, streamDir, fileName), filepath.Join(m.c.MediaPATH, streamDir, fileName)
 }
 
 func (m *M3u8) formatDuration(d time.Duration) string {
@@ -33,10 +29,30 @@ func (m *M3u8) formatDuration(d time.Duration) string {
 	return fmt.Sprintf("%dh%dm%ds", hours, mins, secs)
 }
 
+func (m *M3u8) GetIsNeedCut() bool {
+	m.muCut.Lock()
+	defer m.muCut.Unlock()
+
+	return m.isNeedCut
+}
+
 func (m *M3u8) ChangeIsNeedCut(value bool) {
+	m.muCut.Lock()
+	defer m.muCut.Unlock()
+
 	m.isNeedCut = value
 }
 
+func (m *M3u8) GetIsCancel() bool {
+	m.muCancel.Lock()
+	defer m.muCancel.Unlock()
+
+	return m.isCancel
+}
+
 func (m *M3u8) ChangeIsCancel(value bool) {
+	m.muCancel.Lock()
+	defer m.muCancel.Unlock()
+
 	m.isCancel = value
 }

@@ -9,13 +9,17 @@ import (
 	"sync"
 )
 
-func (m *M3u8) processSegments(segments []string, baseDir string) {
+func (m *M3u8) processSegments(segments []string, baseDir string) bool {
+	if len(segments) == 0 {
+		return false
+	}
+
 	var wg sync.WaitGroup
-	dataMap := make(map[int]string)
+	var dataMap = make([]string, len(segments))
 
 	for index, segment := range segments {
 		url := m.getShortFileName(segment)
-		if m.rottenDownloadedSegments.Has(url) {
+		if m.rottenDownloadedSegments.Has(url) || m.downloadedSegments.Has(url) {
 			continue
 		}
 		dataMap[index] = url
@@ -26,23 +30,24 @@ func (m *M3u8) processSegments(segments []string, baseDir string) {
 
 			data, err := m.downloadSegment(segment)
 			if err != nil || len(data) == 0 {
-				dataMap[index] = ""
+				dataMap[index] = "none"
 				m.log.Error(fmt.Sprintf("[%s/%s] Error downloading segment", m.sm.Username, m.sm.Platform), err, slog.String("segmentURL", segment))
 				return
 			}
 
-			tsPath := filepath.Join(baseDir, url+".ts")
-			filePath := filepath.Join(baseDir, fmt.Sprintf("%s.%s", url, m.c.FileFormat))
+			tsPath := filepath.Join(baseDir, fmt.Sprintf("%s_temp.ts", url))
+			videoPath := filepath.Join(baseDir, fmt.Sprintf("%s.ts", url))
+			audioPath := filepath.Join(baseDir, fmt.Sprintf("%s.wav", url))
 
 			if err := os.WriteFile(tsPath, data, 0644); err != nil {
-				dataMap[index] = ""
+				dataMap[index] = "none"
 				m.log.Error(fmt.Sprintf("[%s/%s] Failed to write segment to file", m.sm.Username, m.sm.Platform), err, slog.String("filePath", tsPath))
 				return
 			}
 
 			segmentFFmpeg, err := ffmpeg.NewFfmpeg(m.c.FFmpegPATH)
 			if err != nil {
-				dataMap[index] = ""
+				dataMap[index] = "none"
 				m.log.Error(fmt.Sprintf("[%s/%s] Failed run ffmpeg", m.sm.Username, m.sm.Platform), err)
 				os.Remove(tsPath)
 				return
@@ -50,11 +55,25 @@ func (m *M3u8) processSegments(segments []string, baseDir string) {
 
 			err = segmentFFmpeg.Yes().
 				LogLevel("error").
+				Format("mpegts").
 				VideoCodec(m.c.VideoCodec).
-				AudioCodec(m.c.AudioCodec).
-				Execute(tsPath, filePath)
+				AudioCodec("none").
+				ExtraArgs([]string{"-copyts"}).
+				Execute([]string{tsPath}, videoPath)
 			if err != nil {
-				dataMap[index] = ""
+				dataMap[index] = "none"
+				m.log.Error(fmt.Sprintf("[%s/%s] Failed run ffmpeg", m.sm.Username, m.sm.Platform), err)
+			}
+
+			segmentFFmpeg.Clear()
+
+			err = segmentFFmpeg.Yes().
+				LogLevel("error").
+				VideoCodec("none").
+				AudioCodec(m.c.AudioCodec).
+				Execute([]string{tsPath}, audioPath)
+			if err != nil {
+				dataMap[index] = "none"
 				m.log.Error(fmt.Sprintf("[%s/%s] Failed run ffmpeg", m.sm.Username, m.sm.Platform), err)
 			}
 
@@ -65,8 +84,19 @@ func (m *M3u8) processSegments(segments []string, baseDir string) {
 	}
 	wg.Wait()
 
+	var isErrDownload bool
 	for _, data := range dataMap {
-		m.rottenDownloadedSegments.Add(data)
+		if data == "" {
+			continue
+		}
+
+		if data == "none" {
+			isErrDownload = true
+			break
+		}
+
 		m.downloadedSegments.Add(data)
 	}
+
+	return isErrDownload
 }
