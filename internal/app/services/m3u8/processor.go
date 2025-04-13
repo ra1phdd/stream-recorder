@@ -26,8 +26,6 @@ func (m *M3u8) processSegments(segments []string, baseDir string) bool {
 		}
 		urlMap[index] = url
 
-		m.segmentId++
-
 		wg.Add(1)
 		go func(index int, segment string) {
 			defer wg.Done()
@@ -60,6 +58,7 @@ func (m *M3u8) processSegments(segments []string, baseDir string) bool {
 				isErrDownload = true
 				break
 			}
+			m.segmentId++
 			m.dataSegments = m.dataSegments[:0]
 		}
 
@@ -88,10 +87,8 @@ func (m *M3u8) flushSegmentToDisk(baseDir, url string) error {
 
 	err = segmentFFmpeg.Yes().
 		LogLevel("error").
-		Format("mpegts").
 		VideoCodec(m.c.VideoCodec).
 		AudioCodec("none").
-		ExtraArgs([]string{"-copyts"}).
 		Execute([]string{tsPath}, videoPath)
 	if err != nil {
 		m.log.Error(fmt.Sprintf("[%s/%s] Failed run ffmpeg", m.sm.Username, m.sm.Platform), err)
