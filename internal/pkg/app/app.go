@@ -56,7 +56,7 @@ func New(workMode string) error {
 	a.utils = utils.New(a.log)
 	a.scheduler = scheduler.New(a.log, a.streamersRepo, a.streamlink, a.cfg, a.state, a.utils)
 
-	//go a.scheduler.Recovery()
+	//a.scheduler.Recovery()
 	go a.scheduler.CheckingForStreams()
 
 	go func() {

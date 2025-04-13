@@ -83,6 +83,7 @@ func (f *FFmpeg) Execute(inputPath []string, outputPath string) error {
 	args = append(args, f.endArgs...)
 	args = append(args, outputPath)
 
+	fmt.Println(args)
 	f.cmd = exec.Command(f.GetFileWithExt(), args...)
 	f.cmd.SysProcAttr = GetSysProcAttr()
 

@@ -1,85 +1,70 @@
 package scheduler
 
 import (
-	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
-	"stream-recorder/internal/app/services/utils"
-	"stream-recorder/pkg/ffmpeg"
+	"sort"
+	"strconv"
+	"stream-recorder/internal/app/services/m3u8"
 	"strings"
 )
 
 func (s *Scheduler) Recovery() {
 	s.log.Warn("Recovering streams...")
-	var files = make(map[string]string)
+	var files = make(map[string][]string)
 
 	err := filepath.Walk(s.cfg.TempPATH, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
+		if info.Size() == 0 {
+			os.Remove(path)
 		}
 
-		if !info.IsDir() && strings.HasSuffix(info.Name(), ".txt") {
-			if info.Size() != 0 {
-				s.log.Warn("Video file found", slog.String("path", filepath.Dir(path)), slog.String("name", info.Name()))
-				files[filepath.Dir(path)] = info.Name()
-			} else {
-				if err := os.Remove(path); err != nil {
-					return fmt.Errorf("failed to remove %s: %w", path, err)
-				}
-			}
+		if info.IsDir() || !strings.Contains(info.Name(), ".wav") && !strings.Contains(info.Name(), ".ts") {
+			return nil
 		}
+
+		files[path] = append(files[path], info.Name())
 
 		return nil
 	})
-
 	if err != nil {
 		s.log.Error("Error reading temp path", err)
 		return
 	}
 
-	u := utils.New(s.log)
-	f, err := ffmpeg.NewFfmpeg(s.cfg.FFmpegPATH)
-	if err != nil {
-		return
-	}
+	for path, f := range files {
+		tempPath := filepath.Join(s.cfg.TempPATH, filepath.Base(filepath.Dir(path)), filepath.Base(filepath.Dir(path)))
+		mediaPath := filepath.Join(s.cfg.MediaPATH, filepath.Base(filepath.Dir(path)), filepath.Base(filepath.Dir(path)))
 
-	for dir, name := range files {
-		err := u.CreateDirectoryIfNotExist(dir)
+		sort.Slice(f, func(i, j int) bool {
+			return extractNumber(f[i]) < extractNumber(f[j])
+		})
+
+		if len(f) > 0 {
+			f = f[:len(f)-1]
+		}
+
+		m, err := m3u8.New(s.log, "", "", false, 0, s.cfg, s.u)
 		if err != nil {
-			s.log.Error("Error creating directory", err, slog.String("path", dir))
-			return
+			s.log.Error("Error creating m3u8", err)
+			continue
 		}
 
-		filePath := filepath.Join(dir, name)
-		output := filepath.Join(s.cfg.MediaPATH, strings.TrimPrefix(filepath.Clean(dir), s.cfg.TempPATH), strings.TrimSuffix(name, ".txt")+"."+s.cfg.FileFormat)
-
-		err = f.Yes().
-			ErrDetect("ignore_err").
-			LogLevel("warning").
-			Format("concat").
-			Safe(0).
-			Async(1).
-			FpsMode("cfr").
-			VideoCodec("copy").
-			AudioCodec("copy").
-			Execute([]string{filePath}, output)
+		err = m.FlushTxtToDisk(tempPath)
 		if err != nil {
-			s.log.Error("Error run ffmpeg", err, slog.String("path", filePath), slog.String("output", output))
+			s.log.Error("Error flush txt to disk", err)
+			continue
 		}
-
-		txt, err := u.ExtractFilenamesFromTxt(filePath)
-		if err != nil {
-			s.log.Error("Error extracting filenames", err, slog.String("path", filePath))
-			return
-		}
-
-		for _, file := range txt {
-			os.Remove(filepath.Join(dir, file))
-		}
-
-		os.Remove(filePath)
+		m.ConcatAndCleanup(tempPath, mediaPath)
 	}
 
 	s.log.Warn("Successfully recovered streams")
+}
+
+func extractNumber(filename string) int {
+	parts := strings.SplitN(filename, "_", 2)
+	if len(parts) < 1 {
+		return -1
+	}
+	num, _ := strconv.Atoi(parts[0])
+	return num
 }
