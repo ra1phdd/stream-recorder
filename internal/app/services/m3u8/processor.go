@@ -62,7 +62,7 @@ func (m *M3u8) processSegments(segments []string, baseDir string) bool {
 		}
 
 		m.dataSegments = append(m.dataSegments, dataMap[i]...)
-		if len(m.dataSegments) >= m.c.BufferSize {
+		if len(m.dataSegments) >= m.c.BufferSize || m.GetIsNeedCut() || m.GetIsCancel() {
 			err := m.flushSegmentToDisk(baseDir, url)
 			if err != nil {
 				isErrDownload = true

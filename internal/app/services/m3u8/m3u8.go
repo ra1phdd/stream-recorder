@@ -104,7 +104,7 @@ func (m *M3u8) Run(playlistURL string) error {
 		if isSplit || m.GetIsNeedCut() || m.GetIsCancel() || isErrDownload {
 			pathTempWithoutExt, pathMediaWithoutExt := m.generateFilePaths(m.streamDir)
 
-			err := m.FlushTxtToDisk(pathTempWithoutExt)
+			pathTempWithoutExtHash, err := m.FlushTxtToDisk(pathTempWithoutExt)
 			if err != nil {
 				m.log.Error(fmt.Sprintf("[%s/%s] Error flush txt to disk", m.sm.Username, m.sm.Platform), err)
 				return err
@@ -112,7 +112,7 @@ func (m *M3u8) Run(playlistURL string) error {
 
 			go func(pathTempWithoutExt, pathMediaWithoutExt string) {
 				m.ConcatAndCleanup(pathTempWithoutExt, pathMediaWithoutExt)
-			}(pathTempWithoutExt, pathMediaWithoutExt)
+			}(pathTempWithoutExtHash, pathMediaWithoutExt)
 
 			m.ChangeIsNeedCut(false)
 			if m.GetIsCancel() {
@@ -208,7 +208,7 @@ func (m *M3u8) ConcatAndCleanup(pathTempWithoutExt, pathMediaWithoutExt string) 
 	m.log.Info("Segment is recorded")
 }
 
-func (m *M3u8) FlushTxtToDisk(pathWithoutExtension string) error {
+func (m *M3u8) FlushTxtToDisk(pathWithoutExtension string) (string, error) {
 	mediaTypes := []struct {
 		fileSuffix string
 		segmentExt string
@@ -221,7 +221,7 @@ func (m *M3u8) FlushTxtToDisk(pathWithoutExtension string) error {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		m.log.Error("Error reading directory", err, slog.String("path", dir), slog.String("username", m.sm.Username), slog.String("platform", m.sm.Platform))
-		return err
+		return "", err
 	}
 
 	hash, _ := m.u.RandomToken(32, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789")
@@ -230,18 +230,19 @@ func (m *M3u8) FlushTxtToDisk(pathWithoutExtension string) error {
 		f, err := os.OpenFile(filePath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
 		if err != nil {
 			m.log.Error("Error creating segment list file", err, slog.String("path", filePath), slog.String("username", m.sm.Username), slog.String("platform", m.sm.Platform))
-			return err
+			return "", err
 		}
-		defer f.Close()
 
 		segments := m.filterAndSortSegments(entries, mt.segmentExt)
 		if err := m.writeSegmentsList(f, segments); err != nil {
 			m.log.Error("Error writing segments list", err, slog.String("path", filePath), slog.String("username", m.sm.Username), slog.String("platform", m.sm.Platform))
-			return err
+			f.Close()
+			return "", err
 		}
+		f.Close()
 	}
 
-	return nil
+	return pathWithoutExtension + "_" + hash, err
 }
 
 func (m *M3u8) filterAndSortSegments(entries []os.DirEntry, ext string) []string {

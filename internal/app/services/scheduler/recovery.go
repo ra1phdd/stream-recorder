@@ -51,26 +51,25 @@ func (s *Scheduler) Recovery() {
 		}
 	}
 
-	//for path := range files {
-	//	hash, _ := s.u.RandomToken(32, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789")
-	//	tempPath := filepath.Join(s.cfg.TempPATH, filepath.Base(path), s.u.RemoveDateFromPath(filepath.Base(path))+"_"+hash+"_recovery")
-	//	mediaPath := filepath.Join(s.cfg.MediaPATH, filepath.Base(path), s.u.RemoveDateFromPath(filepath.Base(path))+"_"+hash+"_recovery")
-	//
-	//	go func(tempPath, mediaPath string) {
-	//		m, err := m3u8.New(s.log, "", "", false, 0, s.cfg, s.u)
-	//		if err != nil {
-	//			s.log.Error("Error creating m3u8", err)
-	//			return
-	//		}
-	//
-	//		err = m.FlushTxtToDisk(tempPath)
-	//		if err != nil {
-	//			s.log.Error("Error flush txt to disk", err)
-	//			return
-	//		}
-	//		m.ConcatAndCleanup(tempPath, mediaPath)
-	//	}(tempPath, mediaPath)
-	//}
+	for path := range files {
+		tempPath := filepath.Join(s.cfg.TempPATH, filepath.Base(path), s.u.RemoveDateFromPath(filepath.Base(path))+"_recovery")
+		mediaPath := filepath.Join(s.cfg.MediaPATH, filepath.Base(path), s.u.RemoveDateFromPath(filepath.Base(path))+"_recovery")
+
+		go func(tempPath, mediaPath string) {
+			m, err := m3u8.New(s.log, "", "", false, 0, s.cfg, s.u)
+			if err != nil {
+				s.log.Error("Error creating m3u8", err)
+				return
+			}
+
+			pathTempWithoutExtHash, err := m.FlushTxtToDisk(tempPath)
+			if err != nil {
+				s.log.Error("Error flush txt to disk", err)
+				return
+			}
+			m.ConcatAndCleanup(pathTempWithoutExtHash, mediaPath)
+		}(tempPath, mediaPath)
+	}
 
 	files = make(map[string][]string)
 	txtFiles = make(map[string][]string)
