@@ -1,13 +1,10 @@
 package streamlink
 
 import (
-	"errors"
 	"log/slog"
-	"math/rand"
 	"stream-recorder/internal/app/models"
+	"stream-recorder/internal/app/services/utils"
 	"stream-recorder/pkg/logger"
-	"strings"
-	"time"
 )
 
 type PlaylistProvider interface {
@@ -20,11 +17,11 @@ type Streamlink struct {
 	Platform PlaylistProvider
 }
 
-func New(log *logger.Logger, platformType string) *Streamlink {
+func New(log *logger.Logger, u *utils.Utils, platformType string) *Streamlink {
 	switch platformType {
 	case "twitch":
 		clientId := "kimne78kx3ncx6brgo4mv6wki5h1ko"
-		deviceId, err := randomToken(32, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789")
+		deviceId, err := u.RandomToken(32, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789")
 		if err != nil {
 			log.Error("Failed generate random token", err)
 			deviceId = "0cgX5cTZnLlpqmQjH71ndyWzrcAI6oal"
@@ -38,25 +35,4 @@ func New(log *logger.Logger, platformType string) *Streamlink {
 	}
 
 	return nil
-}
-
-func randomToken(length int, choices string) (string, error) {
-	if length <= 0 {
-		return "", errors.New("length must be greater than 0")
-	}
-	if len(choices) == 0 {
-		return "", errors.New("choices string must not be empty")
-	}
-
-	var result strings.Builder
-	choicesLen := len(choices)
-
-	r := rand.New(rand.NewSource(time.Now().UnixNano()))
-
-	for i := 0; i < length; i++ {
-		randomIndex := r.Intn(choicesLen)
-		result.WriteByte(choices[randomIndex])
-	}
-
-	return result.String(), nil
 }

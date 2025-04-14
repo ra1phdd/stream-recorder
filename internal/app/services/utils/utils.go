@@ -1,10 +1,15 @@
 package utils
 
 import (
+	"crypto/md5"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
+	"math/rand"
 	"os"
 	"path/filepath"
+	"strconv"
 	"stream-recorder/pkg/logger"
 	"strings"
 	"time"
@@ -18,6 +23,38 @@ func New(log *logger.Logger) *Utils {
 	return &Utils{
 		log: log,
 	}
+}
+
+func (u *Utils) GetShortFileName(url string) string {
+	hasher := md5.New()
+	hasher.Write([]byte(url))
+	return hex.EncodeToString(hasher.Sum(nil))
+}
+
+func (u *Utils) FormatDuration(d time.Duration) string {
+	hours := d / time.Hour
+	d -= hours * time.Hour
+	mins := d / time.Minute
+	d -= mins * time.Minute
+	secs := d / time.Second
+	return fmt.Sprintf("%dh%dm%ds", hours, mins, secs)
+}
+
+func (u *Utils) ExtractNumber(filename string) int {
+	parts := strings.SplitN(filename, "_", 2)
+	if len(parts) < 1 {
+		return -1
+	}
+	num, _ := strconv.Atoi(parts[0])
+	return num
+}
+
+func (u *Utils) RemoveDateFromPath(input string) string {
+	parts := strings.Split(input, "_")
+	if len(parts) < 2 {
+		return input
+	}
+	return strings.Join(parts[:len(parts)-1], "_")
 }
 
 func (u *Utils) CreateDirectoryIfNotExist(path string) error {
@@ -99,4 +136,25 @@ func (u *Utils) RemoveEmptyDirs(dir string) error {
 	}
 
 	return nil
+}
+
+func (u *Utils) RandomToken(length int, choices string) (string, error) {
+	if length <= 0 {
+		return "", errors.New("length must be greater than 0")
+	}
+	if len(choices) == 0 {
+		return "", errors.New("choices string must not be empty")
+	}
+
+	var result strings.Builder
+	choicesLen := len(choices)
+
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+
+	for i := 0; i < length; i++ {
+		randomIndex := r.Intn(choicesLen)
+		result.WriteByte(choices[randomIndex])
+	}
+
+	return result.String(), nil
 }

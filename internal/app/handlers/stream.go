@@ -6,9 +6,12 @@ import (
 	"golang.org/x/time/rate"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"stream-recorder/internal/app/config"
 	"stream-recorder/internal/app/models"
+	"stream-recorder/internal/app/services/m3u8"
 	"stream-recorder/internal/app/services/state"
+	"stream-recorder/internal/app/services/utils"
 	"stream-recorder/pkg/logger"
 	"strings"
 	"time"
@@ -18,15 +21,17 @@ type StreamHandler struct {
 	log  *logger.Logger
 	maps *state.State
 	cfg  *config.Config
+	u    *utils.Utils
 
 	limiter map[string]*rate.Limiter
 }
 
-func NewStream(log *logger.Logger, maps *state.State, cfg *config.Config) *StreamHandler {
+func NewStream(log *logger.Logger, maps *state.State, cfg *config.Config, u *utils.Utils) *StreamHandler {
 	return &StreamHandler{
 		log:     log,
 		maps:    maps,
 		cfg:     cfg,
+		u:       u,
 		limiter: make(map[string]*rate.Limiter),
 	}
 }
@@ -93,57 +98,56 @@ func (s *StreamHandler) CutStreamHandler(c *gin.Context) {
 	})
 }
 
-//func (s *StreamHandler) DownloadM3u8Handler(c *gin.Context) {
-//	url := c.Query("url")
-//	isValid := (strings.HasPrefix(url, "http://") || strings.HasPrefix(url, "https://")) && strings.HasSuffix(url, ".m3u8")
-//	if url == "" || !isValid {
-//		s.log.Warn("Invalid m3u8 URL requested", slog.String("url", url), slog.Bool("is_valid", isValid))
-//		c.JSON(http.StatusBadRequest, gin.H{"error": "url is not a valid m3u8 link"})
-//		return
-//	}
-//	s.log.Debug("Received valid m3u8 URL", slog.String("url", url))
-//
-//	platform := c.Query("platform")
-//	username := c.Query("username")
-//	if platform == "" || username == "" {
-//		s.log.Warn("Empty platform or username", slog.String("platform", platform), slog.String("username", username))
-//		c.JSON(http.StatusBadRequest, gin.H{"error": "platform or username is empty"})
-//		return
-//	}
-//
-//
-//	splitSegments := false
-//	if splitSegmentsStr := c.Query("split_segments"); splitSegmentsStr != "" {
-//		parsed, err := strconv.ParseBool(splitSegmentsStr)
-//		if err != nil {
-//			c.JSON(http.StatusBadRequest, gin.H{"error": "split_segments contains an invalid value (expected true/false)"})
-//			return
-//		}
-//		splitSegments = parsed
-//	}
-//
-//	timeSegment := 1800
-//	if timeSegmentStr := c.Query("time_segment"); timeSegmentStr != "" {
-//		parsed, err := strconv.Atoi(timeSegmentStr)
-//		if err != nil {
-//			c.JSON(http.StatusBadRequest, gin.H{"error": "time_segment contains an invalid value"})
-//			return
-//		}
-//		timeSegment = parsed
-//	}
-//
-//	key := fmt.Sprintf("%s-%s", platform, username)
-//	val, err := m3u8.New(s.log, platform, username, splitSegments, timeSegment, s.cfg)
-//	if err != nil {
-//		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-//		return
-//	}
-//	s.maps.UpdateActiveM3u8(key, val)
-//
-//	err = s.maps.GetActiveM3u8(key).Run(url)
-//	if err != nil {
-//		s.log.Error("Error running m3u8", err)
-//		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to run m3u8"})
-//	}
-//	s.maps.UpdateActiveStreamers(key, false)
-//}
+func (s *StreamHandler) DownloadM3u8Handler(c *gin.Context) {
+	url := c.Query("url")
+	isValid := (strings.HasPrefix(url, "http://") || strings.HasPrefix(url, "https://")) && strings.HasSuffix(url, ".m3u8")
+	if url == "" || !isValid {
+		s.log.Warn("Invalid m3u8 URL requested", slog.String("url", url), slog.Bool("is_valid", isValid))
+		c.JSON(http.StatusBadRequest, gin.H{"error": "url is not a valid m3u8 link"})
+		return
+	}
+	s.log.Debug("Received valid m3u8 URL", slog.String("url", url))
+
+	platform := c.Query("platform")
+	username := c.Query("username")
+	if platform == "" || username == "" {
+		s.log.Warn("Empty platform or username", slog.String("platform", platform), slog.String("username", username))
+		c.JSON(http.StatusBadRequest, gin.H{"error": "platform or username is empty"})
+		return
+	}
+
+	splitSegments := false
+	if splitSegmentsStr := c.Query("split_segments"); splitSegmentsStr != "" {
+		parsed, err := strconv.ParseBool(splitSegmentsStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "split_segments contains an invalid value (expected true/false)"})
+			return
+		}
+		splitSegments = parsed
+	}
+
+	timeSegment := 1800
+	if timeSegmentStr := c.Query("time_segment"); timeSegmentStr != "" {
+		parsed, err := strconv.Atoi(timeSegmentStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "time_segment contains an invalid value"})
+			return
+		}
+		timeSegment = parsed
+	}
+
+	key := fmt.Sprintf("%s-%s", platform, username)
+	val, err := m3u8.New(s.log, platform, username, splitSegments, timeSegment, s.cfg, s.u)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	s.maps.UpdateActiveM3u8(key, val)
+
+	err = s.maps.GetActiveM3u8(key).Run(url)
+	if err != nil {
+		s.log.Error("Error running m3u8", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to run m3u8"})
+	}
+	s.maps.UpdateActiveStreamers(key, false)
+}

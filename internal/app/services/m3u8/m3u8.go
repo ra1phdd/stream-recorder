@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"stream-recorder/internal/app/config"
 	"stream-recorder/internal/app/models"
 	"stream-recorder/internal/app/services/streamlink"
@@ -32,6 +31,7 @@ type M3u8 struct {
 	muCut, muCancel     sync.Mutex
 	isNeedCut, isCancel bool
 	segmentId           int
+	streamDir           string
 
 	dataSegments       []byte
 	downloadedSegments *OrderedSet
@@ -46,7 +46,7 @@ func New(log *logger.Logger, platform, username string, splitSegments bool, time
 	return &M3u8{
 		log: log,
 		c:   c,
-		sl:  streamlink.New(log, "twitch"),
+		sl:  streamlink.New(log, u, "twitch"),
 		u:   u,
 		HTTPClient: &http.Client{
 			Transport: &http.Transport{
@@ -77,11 +77,11 @@ func (m *M3u8) Run(playlistURL string) error {
 		return errors.New("playlistURL is empty")
 	}
 
-	streamDir := fmt.Sprintf("%s_%s_%s", m.sm.Platform, m.sm.Username, time.Now().Format("2006-01-02"))
-	if err := m.u.CreateDirectoryIfNotExist(filepath.Join(m.c.TempPATH, streamDir)); err != nil {
+	m.streamDir = fmt.Sprintf("%s_%s_%s", m.sm.Platform, m.sm.Username, time.Now().Format("2006-01-02"))
+	if err := m.u.CreateDirectoryIfNotExist(filepath.Join(m.c.TempPATH, m.streamDir)); err != nil {
 		return err
 	}
-	if err := m.u.CreateDirectoryIfNotExist(filepath.Join(m.c.MediaPATH, streamDir)); err != nil {
+	if err := m.u.CreateDirectoryIfNotExist(filepath.Join(m.c.MediaPATH, m.streamDir)); err != nil {
 		return err
 	}
 
@@ -97,12 +97,12 @@ func (m *M3u8) Run(playlistURL string) error {
 			m.log.Info(fmt.Sprintf("[%s/%s] The streamer has finished the live broadcast, and I'm starting the final processing...", m.sm.Username, m.sm.Platform))
 			m.isCancel = true
 		}
-		isErrDownload := m.processSegments(segments, filepath.Join(m.c.TempPATH, streamDir))
+		isErrDownload := m.processSegments(segments, filepath.Join(m.c.TempPATH, m.streamDir))
 		m.downloadedSegments.TrimToLast(50)
 
 		isSplit := m.sm.SplitSegments && *m.sm.TotalDurationStream-*m.sm.StartDurationStream > time.Duration(m.sm.TimeSegment)*time.Second
 		if isSplit || m.GetIsNeedCut() || m.GetIsCancel() || isErrDownload {
-			pathTempWithoutExt, pathMediaWithoutExt := m.generateFilePaths(streamDir)
+			pathTempWithoutExt, pathMediaWithoutExt := m.generateFilePaths(m.streamDir)
 
 			err := m.FlushTxtToDisk(pathTempWithoutExt)
 			if err != nil {
@@ -165,13 +165,17 @@ func (m *M3u8) ConcatAndCleanup(pathTempWithoutExt, pathMediaWithoutExt string) 
 
 	go func() {
 		defer wg.Done()
-		runConcat(pathTempWithoutExt+"_audio.txt", fmt.Sprintf("%s.%s", pathTempWithoutExt, getRecommendedFormat(m.c.AudioCodec)), "none", "copy")
+		runConcat(pathTempWithoutExt+"_audio.txt", fmt.Sprintf("%s.%s", pathTempWithoutExt, m.getRecommendedAudioFormat(m.c.AudioCodec)), "none", "copy")
 	}()
 	wg.Wait()
 
+	if err := m.u.CreateDirectoryIfNotExist(filepath.Join(m.c.MediaPATH, m.streamDir)); err != nil {
+		m.log.Error(fmt.Sprintf("[%s/%s] Failed create media directory", m.sm.Username, m.sm.Platform), err)
+	}
+
 	ffConcat, err := ffmpeg.NewFfmpeg(m.c.FFmpegPATH)
 	if err != nil {
-		m.log.Error(fmt.Sprintf("[%s/%s] Initialize ffmpeg", m.sm.Username, m.sm.Platform), err)
+		m.log.Error(fmt.Sprintf("[%s/%s] Failed initialize ffmpeg", m.sm.Username, m.sm.Platform), err)
 	}
 
 	err = ffConcat.Yes().
@@ -180,7 +184,7 @@ func (m *M3u8) ConcatAndCleanup(pathTempWithoutExt, pathMediaWithoutExt string) 
 		AudioCodec("copy").
 		Execute([]string{
 			fmt.Sprintf("%s.%s", pathTempWithoutExt, m.c.FileFormat),
-			fmt.Sprintf("%s.%s", pathTempWithoutExt, getRecommendedFormat(m.c.AudioCodec)),
+			fmt.Sprintf("%s.%s", pathTempWithoutExt, m.getRecommendedAudioFormat(m.c.AudioCodec)),
 		}, fmt.Sprintf("%s_download.%s", pathMediaWithoutExt, m.c.FileFormat))
 	if err != nil {
 		m.log.Error(fmt.Sprintf("[%s/%s] Failed run ffmpeg", m.sm.Username, m.sm.Platform), err)
@@ -193,7 +197,7 @@ func (m *M3u8) ConcatAndCleanup(pathTempWithoutExt, pathMediaWithoutExt string) 
 
 	intermediates := []string{
 		fmt.Sprintf("%s.%s", pathTempWithoutExt, m.c.FileFormat),
-		fmt.Sprintf("%s.%s", pathTempWithoutExt, getRecommendedFormat(m.c.AudioCodec)),
+		fmt.Sprintf("%s.%s", pathTempWithoutExt, m.getRecommendedAudioFormat(m.c.AudioCodec)),
 		pathTempWithoutExt + "_video.txt",
 		pathTempWithoutExt + "_audio.txt",
 	}
@@ -209,8 +213,8 @@ func (m *M3u8) FlushTxtToDisk(pathWithoutExtension string) error {
 		fileSuffix string
 		segmentExt string
 	}{
-		{"_video.txt", fmt.Sprintf(".%s", m.c.FileFormat)},
-		{"_audio.txt", fmt.Sprintf(".%s", getRecommendedFormat(m.c.AudioCodec))},
+		{"video.txt", fmt.Sprintf(".%s", m.c.FileFormat)},
+		{"audio.txt", fmt.Sprintf(".%s", m.getRecommendedAudioFormat(m.c.AudioCodec))},
 	}
 
 	dir := filepath.Dir(pathWithoutExtension)
@@ -220,8 +224,9 @@ func (m *M3u8) FlushTxtToDisk(pathWithoutExtension string) error {
 		return err
 	}
 
+	hash, _ := m.u.RandomToken(32, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789")
 	for _, mt := range mediaTypes {
-		filePath := pathWithoutExtension + mt.fileSuffix
+		filePath := pathWithoutExtension + "_" + hash + "_" + mt.fileSuffix
 		f, err := os.OpenFile(filePath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
 		if err != nil {
 			m.log.Error("Error creating segment list file", err, slog.String("path", filePath), slog.String("username", m.sm.Username), slog.String("platform", m.sm.Platform))
@@ -249,7 +254,7 @@ func (m *M3u8) filterAndSortSegments(entries []os.DirEntry, ext string) []string
 	}
 
 	sort.Slice(segments, func(i, j int) bool {
-		return extractNumber(segments[i]) < extractNumber(segments[j])
+		return m.u.ExtractNumber(segments[i]) < m.u.ExtractNumber(segments[j])
 	})
 
 	return segments
@@ -262,34 +267,4 @@ func (m *M3u8) writeSegmentsList(f *os.File, segments []string) error {
 		}
 	}
 	return nil
-}
-
-func extractNumber(filename string) int {
-	parts := strings.SplitN(filename, "_", 2)
-	if len(parts) < 1 {
-		return -1
-	}
-	num, _ := strconv.Atoi(parts[0])
-	return num
-}
-
-func getRecommendedFormat(codec string) string {
-	codec = strings.ToLower(strings.TrimSpace(codec))
-
-	switch codec {
-	case "mp3", "libmp3lame":
-		return "mp3"
-	case "aac", "libfdk_aac", "aac_latm":
-		return "aac"
-	case "flac":
-		return "flac"
-	case "vorbis", "libvorbis":
-		return "ogg"
-	case "opus", "libopus":
-		return "opus"
-	case "pcm_s16le", "pcm_s24le", "pcm_s32le":
-		return "wav"
-	default:
-		return ""
-	}
 }

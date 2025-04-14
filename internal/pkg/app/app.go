@@ -52,11 +52,11 @@ func New(workMode string) error {
 	a.log.SetLogLevel(a.cfg.LoggerLevel)
 
 	a.streamersRepo = repository.NewStreamers(a.log, a.db)
-	a.streamlink = streamlink.New(a.log, "twitch")
+	a.streamlink = streamlink.New(a.log, a.utils, "twitch")
 	a.utils = utils.New(a.log)
 	a.scheduler = scheduler.New(a.log, a.streamersRepo, a.streamlink, a.cfg, a.state, a.utils)
 
-	//a.scheduler.Recovery()
+	a.scheduler.Recovery()
 	go a.scheduler.CheckingForStreams()
 
 	go func() {
@@ -103,7 +103,7 @@ func setupServer(a *App) error {
 
 	// регистрируем эндпоинты
 	serviceStreamer := handlers.NewStreamer(a.log, a.streamersRepo, a.state)
-	serviceStream := handlers.NewStream(a.log, a.state, a.cfg)
+	serviceStream := handlers.NewStream(a.log, a.state, a.cfg, a.utils)
 
 	// регистрируем маршруты
 	r.GET("/streamer/list", serviceStreamer.GetStreamersHandler)
@@ -111,7 +111,7 @@ func setupServer(a *App) error {
 	r.GET("/streamer/update", serviceStreamer.UpdateStreamerHandler)
 	r.GET("/streamer/delete", serviceStreamer.DeleteStreamerHandler)
 	r.GET("/stream/cut", serviceStream.CutStreamHandler)
-	//r.GET("/stream/download_m3u8", serviceStream.DownloadM3u8Handler)
+	r.GET("/stream/download_m3u8", serviceStream.DownloadM3u8Handler)
 
 	return runServer(r, a.cfg.Port)
 }

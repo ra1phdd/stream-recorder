@@ -1,32 +1,36 @@
 package m3u8
 
 import (
-	"crypto/md5"
-	"encoding/hex"
 	"fmt"
 	"path/filepath"
-	"time"
+	"strings"
 )
 
-func (m *M3u8) getShortFileName(url string) string {
-	hasher := md5.New()
-	hasher.Write([]byte(url))
-	return hex.EncodeToString(hasher.Sum(nil))
-}
-
 func (m *M3u8) generateFilePaths(streamDir string) (string, string) {
-	fileName := fmt.Sprintf("%s_%s_%s", m.sm.Platform, m.sm.Username, m.formatDuration(*m.sm.StartDurationStream))
+	fileName := fmt.Sprintf("%s_%s_%s", m.sm.Platform, m.sm.Username, m.u.FormatDuration(*m.sm.StartDurationStream))
 
 	return filepath.Join(m.c.TempPATH, streamDir, fileName), filepath.Join(m.c.MediaPATH, streamDir, fileName)
 }
 
-func (m *M3u8) formatDuration(d time.Duration) string {
-	hours := d / time.Hour
-	d -= hours * time.Hour
-	mins := d / time.Minute
-	d -= mins * time.Minute
-	secs := d / time.Second
-	return fmt.Sprintf("%dh%dm%ds", hours, mins, secs)
+func (m *M3u8) getRecommendedAudioFormat(codec string) string {
+	codec = strings.ToLower(strings.TrimSpace(codec))
+
+	switch codec {
+	case "mp3", "libmp3lame":
+		return "mp3"
+	case "aac", "libfdk_aac", "aac_latm":
+		return "aac"
+	case "flac":
+		return "flac"
+	case "vorbis", "libvorbis":
+		return "ogg"
+	case "opus", "libopus":
+		return "opus"
+	case "pcm_s16le", "pcm_s24le", "pcm_s32le":
+		return "wav"
+	default:
+		return "aac"
+	}
 }
 
 func (m *M3u8) GetIsNeedCut() bool {

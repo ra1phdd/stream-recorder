@@ -19,7 +19,7 @@ func (m *M3u8) processSegments(segments []string, baseDir string) bool {
 	var urlMap = make([]string, len(segments))
 
 	for index, segment := range segments {
-		url := m.getShortFileName(segment)
+		url := m.u.GetShortFileName(segment)
 		if m.downloadedSegments.Has(url) {
 			urlMap[index] = ""
 			continue
@@ -47,6 +47,16 @@ func (m *M3u8) processSegments(segments []string, baseDir string) bool {
 		}
 
 		if len(dataMap[i]) == 0 {
+			if err := m.u.CreateDirectoryIfNotExist(filepath.Join(m.c.TempPATH, m.streamDir)); err != nil {
+				m.log.Error(fmt.Sprintf("[%s/%s] Failed create temp directory", m.sm.Username, m.sm.Platform), err)
+			}
+
+			err := m.flushSegmentToDisk(baseDir, url)
+			if err == nil {
+				m.segmentId++
+				m.dataSegments = m.dataSegments[:0]
+			}
+
 			isErrDownload = true
 			break
 		}
@@ -71,7 +81,7 @@ func (m *M3u8) processSegments(segments []string, baseDir string) bool {
 func (m *M3u8) flushSegmentToDisk(baseDir, url string) error {
 	tsPath := filepath.Join(baseDir, fmt.Sprintf("%d_%s_temp.ts", m.segmentId, url))
 	videoPath := filepath.Join(baseDir, fmt.Sprintf("%d_%s.%s", m.segmentId, url, m.c.FileFormat))
-	audioPath := filepath.Join(baseDir, fmt.Sprintf("%d_%s.%s", m.segmentId, url, getRecommendedFormat(m.c.AudioCodec)))
+	audioPath := filepath.Join(baseDir, fmt.Sprintf("%d_%s.%s", m.segmentId, url, m.getRecommendedAudioFormat(m.c.AudioCodec)))
 
 	if err := os.WriteFile(tsPath, m.dataSegments, 0644); err != nil {
 		m.log.Error(fmt.Sprintf("[%s/%s] Failed to write segment to file", m.sm.Username, m.sm.Platform), err, slog.String("filePath", tsPath))
